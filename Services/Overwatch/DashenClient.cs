@@ -12,11 +12,24 @@ namespace BnetSwitch.Services.Overwatch;
 // ds 域 POST 需 gl-* 头 + GL-CheckSum=sha1(body+GL-XSRF-TOKEN cookie)；datamsapi 的 GET 只认 URL token。
 public sealed class DashenClient
 {
-    // ---- 常量（来自网易DD抓包）----
+    // ---- 常量（逐字节对齐 2026-07-30 网易DD抓包）----
     private const string Product = "cc_team";
-    private const string UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36 app/df_client";
-    private const string Origin = "https://ccact.ds.163.com";
-    private const string Referer = "https://ccact.ds.163.com/m/daily/df_homepage/owCard.html";
+
+    // 真实客户端 UA:Safari/537.36 后是【两个空格】,末尾带 dfVersion —— 别手改,照抄。
+    // (它自己就不一致:UA 谎称 Chrome 108,sec-ch-ua 却是 Edge WebView2 150;我们同样照抄。)
+    private const string UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36  app/df_client dfVersion/100126";
+
+    // Origin/Referer 分两套(抓包实测):owCard 页发登录/queryCard/queryCountInfo;act 页发其余全部。
+    private const string OriginCc = "https://ccact.ds.163.com";
+    private const string RefererCc = "https://ccact.ds.163.com/m/daily/df_homepage/owCard.html?pageId=home_ow_test&pageName=%E5%AE%88%E6%9C%9B%E5%85%88%E9%94%8B%E9%A6%96%E9%A1%B5";
+    private const string OriginAct = "https://act.ds.163.com";
+    private const string RefererAct = "https://act.ds.163.com/";
+
+    // 浏览器侧指纹头(WebView2 客户端实际发送的全套)
+    private const string SecChUa = "\"Chromium\";v=\"150\", \"Not;A=Brand\";v=\"8\", \"Microsoft Edge\";v=\"150\", \"Microsoft Edge WebView2\";v=\"150\"";
+    private const string AcceptLang = "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6";
+    private const string AcceptJson = "application/json, text/plain, */*";
+
     private const string Q = "https://q.reg.163.com/qrcode";
     private const string Callback = "https://api.cc.163.com/v1/mixteamauth/cookie2LoginToken";
     private const string DS = "https://inf.ds.163.com/v1/web";
@@ -26,7 +39,54 @@ public sealed class DashenClient
 
     private readonly HttpClient _http;
     private readonly CookieContainer _jar = new();
-    private readonly string _deviceId = Guid.NewGuid().ToString();
+
+    // gl-deviceid:真客户端是装机后固定的 GUID(抓包实测 36 位 4 横线)。
+    // 必须持久化 —— cookie 是存盘的,设备号却每次随机,等于"同一账号每次都换新设备",这是风控最敏感的组合。
+    private readonly string _deviceId = StableDeviceId;
+
+    // 同域请求最小间隔,避免突发把对方反爬(antiCrawlerConfig)打醒。全进程共享。
+    private static readonly SemaphoreSlim _gate = new(1, 1);
+    private static DateTime _lastReq = DateTime.MinValue;
+    private const int MinIntervalMs = 250;
+
+    private static string? _cachedDeviceId;
+
+    /// <summary>本机固定的 gl-deviceid(存 %LOCALAPPDATA%\BnetSwitch\ow\device.txt,首次生成后永久复用)。</summary>
+    private static string StableDeviceId
+    {
+        get
+        {
+            if (_cachedDeviceId != null) return _cachedDeviceId;
+            try
+            {
+                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BnetSwitch", "ow");
+                Directory.CreateDirectory(dir);
+                var f = Path.Combine(dir, "device.txt");
+                if (File.Exists(f))
+                {
+                    var s = File.ReadAllText(f).Trim();
+                    if (Guid.TryParse(s, out _)) return _cachedDeviceId = s;
+                }
+                var id = Guid.NewGuid().ToString();
+                File.WriteAllText(f, id);
+                return _cachedDeviceId = id;
+            }
+            catch { return _cachedDeviceId = Guid.NewGuid().ToString(); }   // 落盘失败退化为本次进程内固定
+        }
+    }
+
+    /// <summary>按最小间隔节流(所有出网请求都过这里)。</summary>
+    private static async Task PaceAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            var wait = MinIntervalMs - (int)(DateTime.UtcNow - _lastReq).TotalMilliseconds;
+            if (wait > 0) await Task.Delay(wait);
+            _lastReq = DateTime.UtcNow;
+        }
+        finally { _gate.Release(); }
+    }
 
     private string? _qrUuid;          // 当前二维码 uuid（轮询用）
     private string? _setCookieUrl;     // 扫码确认后拿登录态 cookie 的地址
@@ -38,10 +98,19 @@ public sealed class DashenClient
             CookieContainer = _jar,
             UseCookies = true,
             AllowAutoRedirect = true,
-            ServerCertificateCustomValidationCallback = (_, _, _, _) => true, // 等价 requests verify=False
+            // 真客户端发 accept-encoding: gzip, deflate, br, zstd。.NET 不支持 zstd,
+            // 所以只声明能解的三种(不声明 = 明显非浏览器特征;声明了解不了 = 响应读不出来)。
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
         };
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
-        _http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", UA);
+
+        // 所有请求共有的头(逐字节对齐抓包)
+        var h = _http.DefaultRequestHeaders;
+        h.TryAddWithoutValidation("User-Agent", UA);
+        h.TryAddWithoutValidation("Accept-Language", AcceptLang);
+        h.TryAddWithoutValidation("sec-ch-ua", SecChUa);
+        h.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
+        h.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
     }
 
     // ============ cookie 会话导出/导入（免重复扫码用，DashenAuth 调）============
@@ -99,7 +168,36 @@ public sealed class DashenClient
             ? (v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : v.ToString())
             : "";
 
+    /// <summary>套上每请求都有的浏览器/客户端指纹头。useAct=true 用 act 页那套 Origin/Referer(customer/好友/对局),
+    /// false 用 owCard 页那套(登录、queryCard、queryCountInfo)。gl=true 时附带 gl-* 会话头。</summary>
+    private void ApplyFingerprint(HttpRequestMessage req, bool useAct, bool gl = true)
+    {
+        var h = req.Headers;
+        h.TryAddWithoutValidation("Accept", AcceptJson);
+        if (gl)
+        {
+            h.TryAddWithoutValidation("gl-clienttype", "60");
+            h.TryAddWithoutValidation("gl-deviceid", _deviceId);
+            h.TryAddWithoutValidation("gl-uid", FindCookie("GOD_UUID") ?? "");
+            h.TryAddWithoutValidation("gl-x-xsrf-token", FindCookie("GL-XSRF-TOKEN") ?? "");
+        }
+        h.TryAddWithoutValidation("Origin", useAct ? OriginAct : OriginCc);
+        h.TryAddWithoutValidation("Referer", useAct ? RefererAct : RefererCc);
+        h.TryAddWithoutValidation("sec-fetch-site", "same-site");
+        h.TryAddWithoutValidation("sec-fetch-mode", "cors");
+        h.TryAddWithoutValidation("sec-fetch-dest", "empty");
+        h.TryAddWithoutValidation("priority", "u=1, i");
+    }
+
+    private async Task<string> SendAsync(HttpRequestMessage req)
+    {
+        await PaceAsync();
+        using var resp = await _http.SendAsync(req);
+        return await resp.Content.ReadAsStringAsync();
+    }
+
     // 带 gl-* 头 + 签名的 POST(ds 域 & datamsapi 鉴权 POST 都走它),返回原始响应文本。
+    // 抓包实测:base/login 等 inf.ds 的 POST 用 owCard 页那套 Origin。
     public async Task<string> AuthedPostRawAsync(string url, object obj)
     {
         string body = JsonSerializer.Serialize(obj);   // 紧凑 JSON；checksum 与 body 用同一字符串即自洽
@@ -108,31 +206,18 @@ public sealed class DashenClient
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json"),
         };
-        req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        req.Headers.TryAddWithoutValidation("gl-clienttype", "60");
-        req.Headers.TryAddWithoutValidation("gl-deviceid", _deviceId);
-        req.Headers.TryAddWithoutValidation("gl-uid", FindCookie("GOD_UUID") ?? "");
-        req.Headers.TryAddWithoutValidation("gl-x-xsrf-token", xsrf);
+        ApplyFingerprint(req, useAct: false);
         req.Headers.TryAddWithoutValidation("gl-checksum", Checksum(body, xsrf));
-        req.Headers.TryAddWithoutValidation("Origin", Origin);
-        req.Headers.TryAddWithoutValidation("Referer", Referer);
-        using var resp = await _http.SendAsync(req);
-        return await resp.Content.ReadAsStringAsync();
+        return await SendAsync(req);
     }
 
     // 带 gl-* 头的 GET(getFriendModule 这类"自己会话"鉴权的 GET;无 body 不需 checksum)
+    // 抓包实测:getFriendModule / bnFriend/getBillboard 走 act 页那套 Origin。
     public async Task<string> AuthedGetRawAsync(string url)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        req.Headers.TryAddWithoutValidation("gl-clienttype", "60");
-        req.Headers.TryAddWithoutValidation("gl-deviceid", _deviceId);
-        req.Headers.TryAddWithoutValidation("gl-uid", FindCookie("GOD_UUID") ?? "");
-        req.Headers.TryAddWithoutValidation("gl-x-xsrf-token", FindCookie("GL-XSRF-TOKEN") ?? "");
-        req.Headers.TryAddWithoutValidation("Origin", Origin);
-        req.Headers.TryAddWithoutValidation("Referer", Referer);
-        using var resp = await _http.SendAsync(req);
-        return await resp.Content.ReadAsStringAsync();
+        ApplyFingerprint(req, useAct: true);
+        return await SendAsync(req);
     }
 
     /// <summary>好友列表(getFriendModule,roleId 驱动)。reportToken=该roleId的报告token;mode 如 SportPreset。</summary>
@@ -149,10 +234,15 @@ public sealed class DashenClient
         return doc.RootElement.Clone();
     }
 
+    // 抓包实测:queryCard / queryCountInfo 由 owCard 页发起(ccact),getUserConfig 由 act 页发起。
+    private static readonly HashSet<string> CcactEndpoints = new(StringComparer.OrdinalIgnoreCase) { "queryCard", "queryCountInfo" };
+
     private async Task<string> DataGetAsync(string endpoint, params (string, string)[] query)
     {
         var kv = query.Select(t => new KeyValuePair<string, string>(t.Item1, t.Item2));
-        return await _http.GetStringAsync($"{DATAMS}/{endpoint}{BuildQuery(kv)}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{DATAMS}/{endpoint}{BuildQuery(kv)}");
+        ApplyFingerprint(req, useAct: !CcactEndpoints.Contains(endpoint));
+        return await SendAsync(req);
     }
 
     // ============ ①~④ 扫码登录 ============
@@ -187,6 +277,7 @@ public sealed class DashenClient
     public async Task<PollResult> PollOnceAsync()
     {
         if (_qrUuid is null) return new PollResult(ScanState.Expired);
+        await PaceAsync();
         string text = await _http.GetStringAsync($"{Q}/qrcodeauth" + BuildQuery(new[]
         {
             new KeyValuePair<string, string>("product", Product),
@@ -300,10 +391,8 @@ public sealed class DashenClient
         req.Headers.TryAddWithoutValidation("GL-Bigdata-Role-Id", ownRoleId.ToString());
         req.Headers.TryAddWithoutValidation("GL-Bigdata-Server", "1");
         req.Headers.TryAddWithoutValidation("GL-Bigdata-Dts", Dts);
-        req.Headers.TryAddWithoutValidation("Origin", Origin);
-        req.Headers.TryAddWithoutValidation("Referer", Referer);
-        using var resp = await _http.SendAsync(req);
-        return await resp.Content.ReadAsStringAsync();
+        ApplyFingerprint(req, useAct: true, gl: false);   // customer/* 与 billboard/* 实测走 act 页,且不带 gl-* 会话头
+        return await SendAsync(req);
     }
 
     /// <summary>按 BattleTag 搜账号(查别人)。POST,token/roleId/name 全在 body。返回含 bnetId + customerToken。</summary>
@@ -314,10 +403,7 @@ public sealed class DashenClient
         {
             Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
         };
-        req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        req.Headers.TryAddWithoutValidation("Origin", Origin);
-        req.Headers.TryAddWithoutValidation("Referer", Referer);
-        using var resp = await _http.SendAsync(req);
-        return await resp.Content.ReadAsStringAsync();
+        ApplyFingerprint(req, useAct: true, gl: false);   // 查别人的搜索,与 customer/* 同属 act 页
+        return await SendAsync(req);
     }
 }

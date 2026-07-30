@@ -41,6 +41,12 @@ codesign/
 *.pfx
 *.cer
 
+# ===== 抓包文件:HAR 含登录 token/cookie,任何位置都绝不入库(仓库已公开)=====
+*.har
+*.saz
+*.pcap
+*.pcapng
+
 # ===== 守望战绩逆向/研究资料(HAR 含登录 token,勿入库;icon 是已提取的设计源)=====
 OverWatch_Career_Record/
 icon/
