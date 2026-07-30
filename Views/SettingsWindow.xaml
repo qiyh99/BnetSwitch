@@ -1,0 +1,99 @@
+<Window x:Class="BnetSwitch.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctrl="clr-namespace:BnetSwitch.Controls"
+        Title="设置" WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
+        AllowsTransparency="True" Background="Transparent" WindowStartupLocation="CenterOwner"
+        SizeToContent="Height" Width="392" FontFamily="Microsoft YaHei UI" FontSize="13">
+    <Border Background="{DynamicResource Win}" CornerRadius="12" Margin="16"
+            BorderBrush="{DynamicResource Bd}" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="28" ShadowDepth="0" Opacity="0.35" Color="#000000" />
+        </Border.Effect>
+        <StackPanel>
+            <!-- 头部 -->
+            <Grid Margin="15,13,15,0" MouseLeftButtonDown="OnDrag">
+                <StackPanel Orientation="Horizontal">
+                    <ctrl:IconView Geometry="{StaticResource GeoGear}" Stroke="{DynamicResource Acc}" Thickness="2" IconSize="15" Margin="0,0,8,0" />
+                    <TextBlock Text="设置" Foreground="{DynamicResource Tx1}" FontWeight="SemiBold" FontSize="13.5" VerticalAlignment="Center" />
+                </StackPanel>
+                <Button Style="{StaticResource TitleIconButton}" HorizontalAlignment="Right" Click="OnClose" Width="26" Height="26">
+                    <ctrl:IconView Geometry="{StaticResource GeoX}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="14" />
+                </Button>
+            </Grid>
+
+            <StackPanel Margin="15,6,15,0">
+                <!-- 开机自启 -->
+                <Grid MinHeight="50">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="开机自启" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                        <TextBlock Text="登录 Windows 后在后台启动" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <ToggleButton x:Name="SwAutoStart" Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  Checked="OnAutoStart" Unchecked="OnAutoStart" />
+                    <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
+                </Grid>
+                <!-- 关闭到托盘 -->
+                <Grid MinHeight="50">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="关闭时最小化到托盘" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                        <TextBlock Text="点 ✕ 收到托盘,不退出程序" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <ToggleButton x:Name="SwCloseToTray" Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  Checked="OnCloseToTray" Unchecked="OnCloseToTray" />
+                    <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
+                </Grid>
+                <!-- 深色模式 -->
+                <Grid MinHeight="50">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="深色模式" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                        <TextBlock Text="切换浅色 / 深色主题" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <ToggleButton x:Name="SwDark" Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  Checked="OnDark" Unchecked="OnDark" />
+                    <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
+                </Grid>
+                <!-- 版本更新 -->
+                <Grid MinHeight="50">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="版本更新" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                        <TextBlock x:Name="VerText" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <Button x:Name="BtnUpd" Style="{StaticResource GhostButton}" Height="30" Padding="12,0" HorizontalAlignment="Right"
+                            VerticalAlignment="Center" Click="OnCheckUpdate" Content="检测更新" FontSize="12" />
+                    <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
+                </Grid>
+                <!-- exe 路径 -->
+                <StackPanel Margin="0,12,0,0">
+                    <TextBlock Text="Battle.net.exe 路径" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                    <TextBlock Text="自动探测不到时手动指定" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,8" />
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="34" Padding="14,0" Margin="8,0,0,0"
+                                Click="OnBrowse" Content="浏览…" FontSize="12.5" />
+                        <TextBox x:Name="PathBox" Style="{StaticResource InputBox}" IsReadOnly="True" Foreground="{DynamicResource Tx3}" />
+                    </DockPanel>
+                </StackPanel>
+
+                <!-- 战绩缓存 -->
+                <StackPanel Margin="0,14,0,0">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" x:Name="BtnClearCache" Style="{StaticResource GhostButton}" Height="30" Padding="12,0"
+                                Margin="8,0,0,0" Click="OnClearCache" Content="清除缓存" FontSize="12" VerticalAlignment="Center" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="战绩图片缓存" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                            <TextBlock x:Name="CacheSize" Text="计算中…" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBlock x:Name="CacheDir" Foreground="{DynamicResource Acc}" FontSize="10.5" Margin="0,7,0,0"
+                               TextTrimming="CharacterEllipsis" Cursor="Hand" MouseLeftButtonUp="OnOpenCacheDir" ToolTip="点击打开缓存文件夹" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- 底部 -->
+            <Grid Margin="15,16,15,15">
+                <Button Style="{StaticResource AccentButton}" Height="34" Padding="18,0" HorizontalAlignment="Right"
+                        Click="OnClose" Content="完成" />
+            </Grid>
+        </StackPanel>
+    </Border>
+</Window>

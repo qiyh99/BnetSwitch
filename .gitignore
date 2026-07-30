@@ -1,0 +1,46 @@
+# ===== .NET 构建产物 =====
+bin/
+obj/
+publish/
+publish-fd/
+*.user
+
+# ===== 安装包产物(脚本入库,成品不入库)=====
+installer/out/
+
+# ===== IDE / 工具 =====
+.vs/
+.idea/
+.claude/
+
+# ===== 运行时诊断 / 临时文件 =====
+*.log
+selftest.txt
+crash.log
+switch.txt
+save.txt
+addaccount.txt
+_*.png
+_symbols.txt
+_widths.txt
+
+# ===== 二进制产物(不入库,发布走 Release 打包)=====
+*.exe
+
+# ===== 逆向 / 调试临时(含敏感数据,勿入库)=====
+_lab/
+_tool/
+
+# ===== 私有部分:不随开源客户端入库(仍在本地硬盘,由私有备份维护)=====
+# server(激活码/发卡/广告后台)、website(官网)、codesign(签名私钥)整目录排除。
+server/
+website/
+codesign/
+
+# ===== 代码签名私钥:双保险,任何位置的 pfx 都不入库 =====
+*.pfx
+*.cer
+
+# ===== 守望战绩逆向/研究资料(HAR 含登录 token,勿入库;icon 是已提取的设计源)=====
+OverWatch_Career_Record/
+icon/
