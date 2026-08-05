@@ -14,6 +14,10 @@ public partial class MainWindow : Window
     private System.Windows.Forms.NotifyIcon? _tray;
     private bool _reallyExit;
 
+    /// <summary>盯着战网的 CachedData.db:在战网里登了新号/换了号就自动并进列表,不用手点刷新、更不用重开本工具。</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _watchTimer =
+        new() { Interval = TimeSpan.FromSeconds(2) };
+
     public MainWindow()
     {
         InitializeComponent();
@@ -30,6 +34,8 @@ public partial class MainWindow : Window
             if (!await UpdateGateAsync()) return;   // 强制更新门:有新版必须更新完才进主界面
             StartShowListener();
             await _vm.RefreshAsync();
+            _watchTimer.Tick += async (_, _) => await _vm.PollAccountsAsync();
+            _watchTimer.Start();
             await _vm.InitLicenseAsync();
             await _vm.LoadServerAdsAsync();   // 服务器广告覆盖本地,再决定开屏
             if (ShouldStartHidden())
@@ -281,6 +287,7 @@ public partial class MainWindow : Window
     public void ForceExitForUpdate()
     {
         _reallyExit = true;
+        _watchTimer.Stop();
         DisposeTray();
         Application.Current.Shutdown();
     }
@@ -305,7 +312,7 @@ public partial class MainWindow : Window
     {
         SaveWindowSize();   // 无论收托盘还是退出,都记住当前大小
 
-        if (_reallyExit) { DisposeTray(); base.OnClosing(e); return; }
+        if (_reallyExit) { _watchTimer.Stop(); DisposeTray(); base.OnClosing(e); return; }
 
         // 首次关闭:弹一次「托盘 / 退出」二选一
         if (!_vm.Settings.CloseChoiceMade)
@@ -320,6 +327,7 @@ public partial class MainWindow : Window
 
             if (dlg.MinimizeToTray) { HideToTray(); return; }
             _reallyExit = true;                 // 选了退出
+            _watchTimer.Stop();
             DisposeTray();
             Application.Current.Shutdown();
             return;
@@ -333,6 +341,7 @@ public partial class MainWindow : Window
                 System.Windows.Forms.ToolTipIcon.Info);
             return;
         }
+        _watchTimer.Stop();
         DisposeTray();
         base.OnClosing(e);
     }

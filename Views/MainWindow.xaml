@@ -112,7 +112,7 @@
                             CornerRadius="14" Padding="16" Visibility="{Binding NoCurrentVisibility}">
                         <StackPanel>
                             <TextBlock Text="未检测到当前登录" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Tx1}" />
-                            <TextBlock Text="先在战网登录一个账号,再回来刷新。" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource Tx3}" />
+                            <TextBlock Text="先在战网登录一个账号,登录成功后这里会自动识别。" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource Tx3}" />
                             <Border Height="1" Background="{DynamicResource Bd2}" Margin="0,14" />
                             <Button Style="{StaticResource GhostButton}" Click="OnAddAccount" IsEnabled="{Binding NotBusy}">
                                 <StackPanel Orientation="Horizontal">

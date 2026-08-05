@@ -5,7 +5,7 @@
 ; 说明:框架依赖版(小),安装时检测 .NET 8 桌面运行时,缺了自动下载官方安装器静默安装。
 
 #define AppName "战网账号切换管理器"
-#define AppVer  "2.0.2"
+#define AppVer  "2.0.3"
 #define AppExe  "BnetSwitch.exe"
 #define AppPublisher "qiyh99"
 

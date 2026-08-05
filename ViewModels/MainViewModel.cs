@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
+using BnetSwitch.Models;
 using BnetSwitch.Services;
 using Microsoft.Win32;
 
@@ -337,6 +338,119 @@ public sealed class MainViewModel : ObservableObject
         StatusText = $"已从列表移除「{row.BattleTag}」。它仍在战网里,重新登录该号会再次出现。";
     }
 
+    // ---- 自动检测「战网里登了新号 / 换了号」(避免必须手点刷新或重启本工具)----
+    private string _dbStamp = "";
+    private long? _lastActiveId;
+    private string _lastIdSet = "";
+    private bool _polling;
+
+    /// <summary>从磁盘读一次账号列表 + 当前号指针。</summary>
+    private Task<(IReadOnlyList<BattleAccount> list, long? active)> ReadAllAsync() =>
+        Task.Run(() =>
+        {
+            var l = _reader.ReadAccounts(out var act);
+            return (l, act);
+        });
+
+    /// <summary>
+    /// 把读到的账号列表 + 当前号指针套用到界面。RefreshAsync / 自动轮询 / 保存前 共用,
+    /// 保证「刚登录、列表里从没出现过的号」(换区登录最常见)也能立刻成为当前号。
+    /// </summary>
+    private void ApplyAccounts(IReadOnlyList<BattleAccount> accounts, long? activeId)
+    {
+        Accounts.Clear();
+        // login_cache 的唯一键是 (account_id, environment):同一个号在两个区服登录过就会有两行。
+        // 切换是按 account_id 走的,这里按 id 去重,免得列表里出现两张一模一样的卡。
+        var seen = new HashSet<long>();
+        foreach (var a in accounts)
+        {
+            if (!seen.Add(a.AccountId)) continue;
+            var meta = _profiles.ReadMeta(a.AccountId);
+            Accounts.Add(new AccountRow
+            {
+                AccountId = a.AccountId,
+                BattleTag = string.IsNullOrWhiteSpace(a.BattleTag) ? a.AccountId.ToString() : a.BattleTag,
+                IsActive = activeId.HasValue && a.AccountId == activeId.Value,
+                HasProfile = meta != null,
+                SavedAtUtc = meta?.SavedAtUtc,
+            });
+        }
+
+        // 指针已经指向新号,但战网还没把这一行写进 login_cache(刚登录/换区时有这个空档)。
+        // 补一行占位,保证「保存当前为快照」可用;战网写好后下一次刷新会自动换成真实 BattleTag。
+        if (activeId is long id && !seen.Contains(id))
+        {
+            var meta = _profiles.ReadMeta(id);
+            Accounts.Add(new AccountRow
+            {
+                AccountId = id,
+                BattleTag = string.IsNullOrWhiteSpace(meta?.BattleTag) ? id.ToString() : meta!.BattleTag,
+                IsActive = true,
+                HasProfile = meta != null,
+                SavedAtUtc = meta?.SavedAtUtc,
+            });
+        }
+
+        _lastActiveId = activeId;
+        _lastIdSet = string.Join(",", Accounts.Select(r => r.AccountId).OrderBy(x => x));
+        RebuildGroups();
+    }
+
+    /// <summary>记下 CachedData.db 当前的文件戳,避免轮询白读一遍。</summary>
+    private void StampDb()
+    {
+        try
+        {
+            var fi = new FileInfo(_paths.CachedDataDb);
+            _dbStamp = fi.Exists ? fi.LastWriteTimeUtc.Ticks + ":" + fi.Length : "";
+        }
+        catch { _dbStamp = ""; }
+    }
+
+    /// <summary>
+    /// 定时轮询(界面层每 2 秒调一次):战网里登了新号或换了号就自动并进列表。
+    /// 先比文件戳(便宜),变了才真读库;再比「账号集合 + 当前号」,内容真变了才重建 UI。
+    /// </summary>
+    public async Task PollAccountsAsync()
+    {
+        if (_polling || Busy || !_paths.Exists) return;
+        _polling = true;
+        try
+        {
+            string stamp;
+            try
+            {
+                var fi = new FileInfo(_paths.CachedDataDb);
+                if (!fi.Exists) return;
+                stamp = fi.LastWriteTimeUtc.Ticks + ":" + fi.Length;
+            }
+            catch { return; }
+
+            if (stamp == _dbStamp) return;
+            _dbStamp = stamp;
+
+            var (list, activeId) = await ReadAllAsync();
+            // 读的过程中用户开始了保存/切换:交给它去做,同时把文件戳清掉,下一拍重读一次别漏掉变化。
+            if (Busy) { _dbStamp = ""; return; }
+
+            // 战网写库很频繁(目录缓存、统计等),只有账号集合或当前号真变了才动界面。
+            var idSet = string.Join(",", list.Select(a => a.AccountId)
+                                             .Concat(activeId.HasValue ? new[] { activeId.Value } : Array.Empty<long>())
+                                             .Distinct().OrderBy(x => x));
+            if (activeId == _lastActiveId && idSet == _lastIdSet) return;
+
+            var knownBefore = new HashSet<long>(Accounts.Select(r => r.AccountId));
+            ApplyAccounts(list, activeId);
+
+            if (CurrentAccount is { } cur && !knownBefore.Contains(cur.AccountId))
+                StatusText = $"检测到新登录的账号「{cur.BattleTag}」,点左侧『保存当前为快照』把它存下来。";
+            else if (CurrentAccount is { } c2)
+                StatusText = $"当前登录账号已变为「{c2.BattleTag}」。";
+        }
+        catch { /* 后台轮询,出错静默,下次再来 */ }
+        finally { _polling = false; }
+    }
+
     public async Task RefreshAsync()
     {
         if (Busy) return;
@@ -353,26 +467,9 @@ public sealed class MainViewModel : ObservableObject
                 return;
             }
 
-            var (accounts, activeId) = await Task.Run(() =>
-            {
-                var list = _reader.ReadAccounts(out var act);
-                return (list, act);
-            });
-
-            Accounts.Clear();
-            foreach (var a in accounts)
-            {
-                var meta = _profiles.ReadMeta(a.AccountId);
-                Accounts.Add(new AccountRow
-                {
-                    AccountId = a.AccountId,
-                    BattleTag = string.IsNullOrWhiteSpace(a.BattleTag) ? a.AccountId.ToString() : a.BattleTag,
-                    IsActive = activeId.HasValue && a.AccountId == activeId.Value,
-                    HasProfile = meta != null,
-                    SavedAtUtc = meta?.SavedAtUtc,
-                });
-            }
-            RebuildGroups();
+            StampDb();
+            var (accounts, activeId) = await ReadAllAsync();
+            ApplyAccounts(accounts, activeId);
 
             var hidden = new HashSet<long>(_settings.HiddenAccountIds);
             var visibleTotal = Accounts.Count(r => !hidden.Contains(r.AccountId));
@@ -403,9 +500,11 @@ public sealed class MainViewModel : ObservableObject
         Busy = true;
         try
         {
-            var activeId = await Task.Run(() => _reader.ReadActiveAccountId());
-            foreach (var a in Accounts)
-                a.IsActive = activeId.HasValue && a.AccountId == activeId.Value;
+            // 重读整张表(不能只读指针再去内存旧列表里找):刚登录的新号 —— 尤其是换区登录的号 ——
+            // 界面上那份列表里根本没有,只查内存会误报「没有检测到当前登录的账号」。
+            StampDb();
+            var (list, activeId) = await ReadAllAsync();
+            ApplyAccounts(list, activeId);
 
             var active = activeId is null ? null : Accounts.FirstOrDefault(a => a.AccountId == activeId.Value);
             if (active is null)
@@ -483,6 +582,7 @@ public sealed class MainViewModel : ObservableObject
 
             foreach (var a in Accounts)
                 a.IsActive = a.AccountId == target.AccountId;
+            _lastActiveId = target.AccountId;   // 对齐轮询基线,免得战网写完指针后又报一次"当前账号已变"
             RebuildGroups();
             StatusText = $"已切换到「{target.BattleTag}」,战网正在启动。若仍是上一个号,请刷新/重开战网。";
         }
@@ -512,7 +612,15 @@ public sealed class MainViewModel : ObservableObject
             StatusText = "正在回到登录页(未登出)…";
             await Task.Run(() => _profiles.ClearCurrentPointer());
             await Task.Run(() => _controller.LaunchClient());
-            StatusText = "已回到登录页。请在战网里登录新账号,登录后回来点『保存当前为快照』。";
+
+            // 身份卡还挂着上一个号会误导人(它已经不是"当前登录"了),先摘掉;
+            // 顺便清掉轮询基线,等用户在战网登完新号,PollAccountsAsync 会自动把它并进列表。
+            foreach (var a in Accounts) a.IsActive = false;
+            _lastActiveId = null;
+            _dbStamp = "";
+            RebuildGroups();
+
+            StatusText = "已回到登录页。请在战网里登录新账号(换区也行),登录成功后本工具会自动识别。";
         }
         catch (Exception ex)
         {
