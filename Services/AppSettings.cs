@@ -77,7 +77,7 @@ public sealed class AppSettings
     /// <summary>「联系开发者」弹窗:QQ 交流群链接。</summary>
     public string QQGroupUrl { get; set; } = "https://qm.qq.com/q/3SeTEXIIGI";
 
-    /// <summary>「联系开发者」弹窗:GitHub 开源仓库(GPLv3 源码,引导 Star;安装包发行仍在 BnetSwitch-releases)。</summary>
+    /// <summary>「联系开发者」弹窗:GitHub 开源仓库(GPLv3 源码 + 安装包发行,自 v2.0.3 起合并到这一个仓)。</summary>
     public string GithubUrl { get; set; } = "https://github.com/qiyh99/BnetSwitch";
 
     /// <summary>版本更新检测接口:返回 {version,notes,url} 的 JSON 地址。留空则「检测更新」只显示当前版本。</summary>
