@@ -32,6 +32,20 @@ public sealed class BattleNetController
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int cmd);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
+    private const int SW_RESTORE = 9;
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr param);
 
     // 客户端进程(不含 Agent)
@@ -93,6 +107,35 @@ public sealed class BattleNetController
             Thread.Sleep(intervalMs);
         }
         return !IsClientRunning();
+    }
+
+    /// <summary>
+    /// 战网已经在跑就把它的窗口唤到前台,返回是否唤到了。
+    /// 缩在托盘里的时候顶层窗是隐藏的,这里拿不到可见窗 → 返回 false,交给调用方再跑一次 exe
+    /// (战网是单实例,第二次启动会把已有窗口自己拉出来)。
+    /// </summary>
+    public bool TryFocusClient()
+    {
+        var procs = Process.GetProcessesByName("Battle.net");
+        var pids = new HashSet<uint>(procs.Select(p => (uint)p.Id));
+        foreach (var p in procs) p.Dispose();
+        if (pids.Count == 0) return false;
+
+        var hit = IntPtr.Zero;
+        EnumWindowsProc collector = (h, _) =>
+        {
+            GetWindowThreadProcessId(h, out var pid);
+            // 只认「可见 + 有标题」的顶层窗:CEF 会开一堆不可见的辅助窗,唤那些没有任何效果
+            if (!pids.Contains(pid) || !IsWindowVisible(h) || GetWindowTextLength(h) == 0) return true;
+            hit = h;
+            return false;
+        };
+        EnumWindows(collector, IntPtr.Zero);
+        GC.KeepAlive(collector);
+        if (hit == IntPtr.Zero) return false;
+
+        ShowWindow(hit, SW_RESTORE);
+        return SetForegroundWindow(hit);
     }
 
     public void LaunchClient()

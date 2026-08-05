@@ -80,16 +80,51 @@
                                 <Run Text="{Binding CurrentAccount.HashTag, Mode=OneWay}" Foreground="{DynamicResource Tx3}" FontWeight="Normal" />
                             </TextBlock>
                             <TextBlock Text="{Binding CurrentAccount.AccountIdText}" Margin="0,3,0,0" FontSize="12" Foreground="{DynamicResource Tx3}" />
-                            <Border HorizontalAlignment="Left" Margin="0,10,0,0" CornerRadius="10" Background="{DynamicResource OkSoft}" Padding="9,3">
-                                <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource Ok}" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                    <TextBlock Text="当前登录中" Foreground="{DynamicResource OkTx}" FontSize="12" />
-                                </StackPanel>
-                            </Border>
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Border CornerRadius="10" Background="{DynamicResource OkSoft}" Padding="9,3">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="7" Height="7" Fill="{DynamicResource Ok}" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                        <TextBlock Text="当前登录中" Foreground="{DynamicResource OkTx}" FontSize="12" />
+                                    </StackPanel>
+                                </Border>
+                                <Border CornerRadius="10" Padding="9,3" Margin="6,0,0,0"
+                                        Visibility="{Binding CurrentAccount.RegionVisibility}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource TagBg}" />
+                                            <Style.Triggers>
+                                                <!-- 国际服/亚服用主题色标出来,和右侧列表一致 -->
+                                                <DataTrigger Binding="{Binding CurrentAccount.IsCnRegion}" Value="False">
+                                                    <Setter Property="Background" Value="{DynamicResource AccSoft}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding CurrentAccount.RegionText, Mode=OneWay}" FontSize="12">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource Tx2}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding CurrentAccount.IsCnRegion}" Value="False">
+                                                        <Setter Property="Foreground" Value="{DynamicResource Acc}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Border>
+                            </StackPanel>
                             <Border Height="1" Background="{DynamicResource Bd2}" Margin="0,14" />
-                            <Button Style="{StaticResource AccentButton}" Click="OnSaveCurrent" Margin="0,0,0,8" IsEnabled="{Binding NotBusy}">
+                            <!-- 每次开工具都要用的动作放最上面:直接上当前这个号,不用自己再去找战网图标 -->
+                            <Button Style="{StaticResource AccentButton}" Click="OnLaunchClient" Margin="0,0,0,8" IsEnabled="{Binding NotBusy}">
                                 <StackPanel Orientation="Horizontal">
-                                    <ctrl:IconView Geometry="{StaticResource GeoCam}" Stroke="{DynamicResource OnAcc}" Thickness="2" IconSize="16" Margin="0,0,7,0" />
+                                    <ctrl:IconView Geometry="{StaticResource GeoPower}" Stroke="{DynamicResource OnAcc}" Thickness="2" IconSize="16" Margin="0,0,7,0" />
+                                    <TextBlock Text="{Binding LaunchText}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource GhostButton}" Click="OnSaveCurrent" Margin="0,0,0,8" IsEnabled="{Binding NotBusy}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ctrl:IconView Geometry="{StaticResource GeoCam}" Stroke="{DynamicResource Tx1}" Thickness="2" IconSize="16" Margin="0,0,7,0" />
                                     <TextBlock Text="保存当前为快照" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
@@ -114,6 +149,13 @@
                             <TextBlock Text="未检测到当前登录" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Tx1}" />
                             <TextBlock Text="先在战网登录一个账号,登录成功后这里会自动识别。" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource Tx3}" />
                             <Border Height="1" Background="{DynamicResource Bd2}" Margin="0,14" />
+                            <!-- 没识别到当前号,多半就是战网还没开:先给个启动入口,别让人卡在这张空卡片上 -->
+                            <Button Style="{StaticResource AccentButton}" Click="OnLaunchClient" Margin="0,0,0,8" IsEnabled="{Binding NotBusy}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ctrl:IconView Geometry="{StaticResource GeoPower}" Stroke="{DynamicResource OnAcc}" Thickness="2" IconSize="16" Margin="0,0,7,0" />
+                                    <TextBlock Text="{Binding LaunchText}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                             <Button Style="{StaticResource GhostButton}" Click="OnAddAccount" IsEnabled="{Binding NotBusy}">
                                 <StackPanel Orientation="Horizontal">
                                     <ctrl:IconView Geometry="{StaticResource GeoUser}" Stroke="{DynamicResource Tx1}" Thickness="2" IconSize="16" Margin="0,0,7,0" />
@@ -178,6 +220,12 @@
                                                     </TextBlock>
                                                     <DockPanel Margin="0,2,0,0">
                                                         <Ellipse DockPanel.Dock="Left" Width="6" Height="6" Fill="{DynamicResource Fresh}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                        <Border x:Name="RegionPill" DockPanel.Dock="Left" CornerRadius="4" Padding="5,1" Margin="0,0,6,0"
+                                                                VerticalAlignment="Center" Background="{DynamicResource TagBg}"
+                                                                Visibility="{Binding RegionVisibility}">
+                                                            <TextBlock x:Name="RegionTx" Text="{Binding RegionText, Mode=OneWay}" FontSize="10.5"
+                                                                       Foreground="{DynamicResource Tx3}" />
+                                                        </Border>
                                                         <TextBlock FontSize="11.5" Foreground="{DynamicResource Tx3}" TextTrimming="CharacterEllipsis">
                                                             <Run Text="{Binding SavedRelative, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding AccountIdText, Mode=OneWay}" />
                                                         </TextBlock>
@@ -186,6 +234,11 @@
                                             </DockPanel>
                                         </Border>
                                         <DataTemplate.Triggers>
+                                            <!-- 国际服/亚服的号用主题色标出来:一屏基本都是国服,挑出来的才有意义 -->
+                                            <DataTrigger Binding="{Binding IsCnRegion}" Value="False">
+                                                <Setter TargetName="RegionPill" Property="Background" Value="{DynamicResource AccSoft}" />
+                                                <Setter TargetName="RegionTx" Property="Foreground" Value="{DynamicResource Acc}" />
+                                            </DataTrigger>
                                             <Trigger SourceName="CardRoot" Property="IsMouseOver" Value="True">
                                                 <Setter TargetName="CardRoot" Property="BorderBrush" Value="{DynamicResource AccBd}" />
                                                 <Setter TargetName="GoPill" Property="Background" Value="{DynamicResource Acc}" />
@@ -231,13 +284,25 @@
                                                     <TextBlock FontSize="13.5" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource OffTx}">
                                                         <Run Text="{Binding NameOnly, Mode=OneWay}" /><Run Text="{Binding HashTag, Mode=OneWay}" />
                                                     </TextBlock>
-                                                    <TextBlock FontSize="11.5" Foreground="{DynamicResource Tx3}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
-                                                        <Run Text="未保存 · " /><Run Text="{Binding AccountIdText, Mode=OneWay}" />
-                                                    </TextBlock>
+                                                    <DockPanel Margin="0,2,0,0">
+                                                        <Border x:Name="RegionPill2" DockPanel.Dock="Left" CornerRadius="4" Padding="5,1" Margin="0,0,6,0"
+                                                                VerticalAlignment="Center" Background="{DynamicResource TagBg}"
+                                                                Visibility="{Binding RegionVisibility}">
+                                                            <TextBlock x:Name="RegionTx2" Text="{Binding RegionText, Mode=OneWay}" FontSize="10.5"
+                                                                       Foreground="{DynamicResource Tx3}" />
+                                                        </Border>
+                                                        <TextBlock FontSize="11.5" Foreground="{DynamicResource Tx3}" TextTrimming="CharacterEllipsis">
+                                                            <Run Text="未保存 · " /><Run Text="{Binding AccountIdText, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                    </DockPanel>
                                                 </StackPanel>
                                             </DockPanel>
                                         </Border>
                                         <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsCnRegion}" Value="False">
+                                                <Setter TargetName="RegionPill2" Property="Background" Value="{DynamicResource AccSoft}" />
+                                                <Setter TargetName="RegionTx2" Property="Foreground" Value="{DynamicResource Acc}" />
+                                            </DataTrigger>
                                             <Trigger SourceName="UnsavedRoot" Property="IsMouseOver" Value="True">
                                                 <Setter TargetName="HideBtn" Property="Visibility" Value="Visible" />
                                             </Trigger>

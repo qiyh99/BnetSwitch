@@ -43,6 +43,14 @@ public sealed class PlayerStats
     public string AvgHeal { get; set; } = "";
     public string AvgResist { get; set; } = "";       // 场均抵挡
     public bool HasResist => !string.IsNullOrEmpty(AvgResist);
+
+    // 口径标签:国服(网易)是「场均」,国际服(暴雪生涯页)是「每10分钟」——两边数不是一回事,
+    // 标签必须跟着数据源走,不能写死。默认值是国服口径,国服窗不绑这几个属性也不受影响。
+    public string AvgDamageLabel { get; set; } = "场均伤害";
+    public string AvgHealLabel { get; set; } = "场均治疗";
+    public string AvgResistLabel { get; set; } = "场均抵挡";
+    public string KdaLabel { get; set; } = "KDA";
+    public string WinRateLabel { get; set; } = "本赛季胜率";
     public string Kda { get; set; } = "";
     public string SeasonWinRate { get; set; } = "";
     public string WinLossText { get; set; } = "";     // 例:69胜 60负
@@ -71,6 +79,7 @@ public sealed class HeroStat
     public string? IconLocal { get; set; }            // 英雄小图标本地路径
     public string Detail { get; set; } = "";          // 例:87h · 58%
     public double PlayPercent { get; set; }           // 0~100,条形图长度
+    public string PlayPercentText => PlayPercent > 0 ? PlayPercent.ToString("0") + "%" : "";  // 国际服窗单列显示占比
     // 点击详情用:
     public string HoursText { get; set; } = "";       // 87 小时
     public string WinRateText { get; set; } = "";     // 58%
@@ -81,6 +90,8 @@ public sealed class HeroStat
     public bool HasRank => !string.IsNullOrEmpty(RankText);
     public List<StatItem> DetailStats { get; set; } = new();  // 场均属性(命中率/伤害/消灭…)
     public List<StatItem> DetailStatsPerTen { get; set; } = new(); // 每10分钟属性
+    /// <summary>详情窗左边那个页签的名字:国服是「场均」,国际服(暴雪)给的是生涯累计值。</summary>
+    public string TotalTabText { get; set; } = "场均";
     public bool HasPerTen => DetailStatsPerTen.Count > 0;
 }
 
@@ -307,6 +318,21 @@ public sealed class PercentToWidthConverter : IValueConverter
         return Math.Max(0, Math.Min(100, percent)) / 100.0 * max;
     }
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+// ===== 英雄时长条形图(轨道宽度随窗口变):(百分比, 轨道实际宽度) → 填充宽度 =====
+// PercentToWidthConverter 那套要预先知道轨道有多宽,轨道比参数窄的时候会被 MaxWidth 一律夹成满格。
+// 国际服窗的占比列只有 100 多像素,必须按轨道实际宽度算。
+public sealed class PercentBarWidthConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+    {
+        double percent = values.Length > 0 && values[0] is double d ? d : 0;
+        double track = values.Length > 1 && values[1] is double w && !double.IsNaN(w) ? w : 0;
+        return Math.Max(0, Math.Min(100, percent)) / 100.0 * track;
+    }
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
 

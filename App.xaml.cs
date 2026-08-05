@@ -94,6 +94,32 @@ public partial class App : Application
             return;
         }
 
+        // 国际服生涯链路验证:--careerprobe "Name#1234"。抓暴雪生涯页 → 解析 → 映射,写 careerprobe.txt 并打开。
+        if (e.Args.Length >= 1 && e.Args[0] == "--careerprobe")
+        {
+            var sb4 = new StringBuilder();
+            var tag = e.Args.Length >= 2 ? e.Args[1] : "";
+            try { Task.Run(() => Services.Overwatch.CareerProbe.RunAsync(sb4, tag)).GetAwaiter().GetResult(); }
+            catch (Exception ex) { sb4.AppendLine("异常: " + ex); }
+            try
+            {
+                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BnetSwitch");
+                Directory.CreateDirectory(dir);
+                // 不自动打开:这个探针要反复跑,弹一堆记事本比看不到结果更烦
+                File.WriteAllText(Path.Combine(dir, "careerprobe.txt"), sb4.ToString(), Encoding.UTF8);
+            }
+            catch { }
+            Shutdown(0);
+            return;
+        }
+
+        // 国际服生涯界面验证:--careerdemo "Name#1234"。免登录直接开新窗,查布局/分段切换是否正常。
+        if (e.Args.Length >= 1 && e.Args[0] == "--careerdemo")
+        {
+            Stats.CareerWindow.ShowStandalone(e.Args.Length >= 2 ? e.Args[1] : "");
+            return;
+        }
+
         // 守望先锋战绩链路验证:--owtest。扫码 → 遍历账号库拉取翻译 → 写 owtest.txt 并打开。
         if (e.Args.Contains("--owtest"))
         {

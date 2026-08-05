@@ -34,6 +34,34 @@ public sealed class AccountRow : ObservableObject
     public long AccountId { get; init; }
     public string BattleTag { get; init; } = "";
 
+    /// <summary>login_cache.environment,如 cn.actual.battlenet.com.cn / kr.actual.battle.net。占位行拿不到,留空。</summary>
+    public string Environment { get; init; } = "";
+
+    /// <summary>国服?空环境(占位行)按国服算 —— 保持老行为,查战绩仍走现有国服窗。</summary>
+    public bool IsCnRegion => IsCn(Environment) || string.IsNullOrWhiteSpace(Environment);
+
+    public static bool IsCn(string? environment)
+        => environment?.Contains("battlenet.com.cn", StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>卡片上的区服短标。环境串拿不到就返回空 —— 宁可不标,也别把不知道的号硬说成国服。</summary>
+    public string RegionText => Region(Environment);
+    public Visibility RegionVisibility => RegionText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>environment 形如 kr.actual.battle.net / cn.actual.battlenet.com.cn,第一段就是区服代码。</summary>
+    public static string Region(string? environment)
+    {
+        if (string.IsNullOrWhiteSpace(environment)) return "";
+        if (IsCn(environment)) return "国服";
+        return environment.Split('.')[0].ToLowerInvariant() switch
+        {
+            "kr" => "亚服",
+            "us" => "美服",
+            "eu" => "欧服",
+            "tw" => "台服",
+            _ => "国际服",      // 暴雪新开的区/测试环境,别显示成空白
+        };
+    }
+
     private bool _isActive;
     public bool IsActive
     {
@@ -128,6 +156,16 @@ public sealed class MainViewModel : ObservableObject
     private bool _busy;
     public bool Busy { get => _busy; set { Set(ref _busy, value); Raise(nameof(NotBusy)); } }
     public bool NotBusy => !_busy;
+
+    private bool _clientRunning;
+    /// <summary>战网客户端(不含 Agent)是否在跑。轮询刷新,身份卡上那个按钮的文案跟着它变。</summary>
+    public bool ClientRunning
+    {
+        get => _clientRunning;
+        private set { Set(ref _clientRunning, value); Raise(nameof(LaunchText)); }
+    }
+
+    public string LaunchText => _clientRunning ? "打开战网窗口" : "启动战网";
 
     public string AppVersion => "v" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0");
 
@@ -362,6 +400,14 @@ public sealed class MainViewModel : ObservableObject
         // login_cache 的唯一键是 (account_id, environment):同一个号在两个区服登录过就会有两行。
         // 切换是按 account_id 走的,这里按 id 去重,免得列表里出现两张一模一样的卡。
         var seen = new HashSet<long>();
+
+        // 区服(决定「查战绩」走国服网易还是国际服暴雪):同一个号两行时,只要有一行是国服就按国服算——
+        // 国服那边数据更全(有对局记录),而且国服号在暴雪侧查不到。
+        var envs = accounts.GroupBy(a => a.AccountId).ToDictionary(
+            g => g.Key,
+            g => g.FirstOrDefault(a => AccountRow.IsCn(a.Environment))?.Environment
+                 ?? g.Select(a => a.Environment).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "");
+
         foreach (var a in accounts)
         {
             if (!seen.Add(a.AccountId)) continue;
@@ -369,6 +415,7 @@ public sealed class MainViewModel : ObservableObject
             Accounts.Add(new AccountRow
             {
                 AccountId = a.AccountId,
+                Environment = envs.TryGetValue(a.AccountId, out var env) ? env : a.Environment,
                 BattleTag = string.IsNullOrWhiteSpace(a.BattleTag) ? a.AccountId.ToString() : a.BattleTag,
                 IsActive = activeId.HasValue && a.AccountId == activeId.Value,
                 HasProfile = meta != null,
@@ -413,6 +460,9 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     public async Task PollAccountsAsync()
     {
+        // 按钮文案得跟着战网开没开走,不能被下面那一串提前 return 挡掉
+        ClientRunning = await Task.Run(() => _controller.IsClientRunning());
+
         if (_polling || Busy || !_paths.Exists) return;
         _polling = true;
         try
@@ -486,6 +536,40 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusText = "读取失败:" + ex.Message;
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    /// <summary>
+    /// 启动战网 / 把已经在跑的战网唤到前台。
+    /// 不碰任何账号文件 —— 当前指针是谁就登谁,所以开了工具能直接上号,不用再自己去找战网图标。
+    /// </summary>
+    public async Task LaunchClientAsync()
+    {
+        if (Busy) return;
+        Busy = true;
+        try
+        {
+            if (await Task.Run(() => _controller.TryFocusClient()))
+            {
+                StatusText = "战网已在运行,已唤到前台。";
+                return;
+            }
+
+            StatusText = "正在启动战网…";
+            await Task.Run(() => _controller.LaunchClient());
+            ClientRunning = true;
+            StatusText = CurrentAccount is { } cur
+                ? $"战网启动中,稍等几秒会自动登录「{cur.BattleTag}」。"
+                : "战网启动中。";
+        }
+        catch (Exception ex)
+        {
+            StatusText = "启动失败:" + ex.Message;
+            MessageBox.Show(ex.Message, "启动战网失败", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {

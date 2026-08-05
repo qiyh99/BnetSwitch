@@ -46,6 +46,8 @@
     <StreamGeometry x:Key="GeoChat">M-12,-9 H12 V4 H-4 L-9,10 V4 H-12 Z</StreamGeometry>
     <StreamGeometry x:Key="GeoCode">M-4,-8 L-12,0 L-4,8 M4,-8 L12,0 L4,8</StreamGeometry>
     <StreamGeometry x:Key="GeoChart">M-9,9 V-1 M0,9 V-9 M9,9 V4</StreamGeometry>
+    <!-- 电源符号:竖线 + 缺口朝上的 270° 圆弧 -->
+    <StreamGeometry x:Key="GeoPower">M0,-11 V-1 M-6.4,-6.4 A9,9 0 1 0 6.4,-6.4</StreamGeometry>
 
     <!-- Logo(六边形,外描边 + 内填充)-->
     <StreamGeometry x:Key="GeoLogoOuter">M0,-14 L12.1,-7 L12.1,7 L0,14 L-12.1,7 L-12.1,-7 Z</StreamGeometry>

@@ -383,23 +383,23 @@
                         <UniformGrid Columns="5">
                             <StackPanel Margin="6,11" HorizontalAlignment="Center">
                                 <TextBlock Text="{Binding AvgDamage}" FontSize="16" FontWeight="ExtraBold" Foreground="{DynamicResource Stats.Tx1}" HorizontalAlignment="Center"/>
-                                <TextBlock Text="场均伤害" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                <TextBlock Text="{Binding AvgDamageLabel}" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                             </StackPanel>
                             <StackPanel Margin="6,11" HorizontalAlignment="Center">
                                 <TextBlock Text="{Binding AvgHeal}" FontSize="16" FontWeight="ExtraBold" Foreground="{DynamicResource Stats.Tx1}" HorizontalAlignment="Center"/>
-                                <TextBlock Text="场均治疗" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                <TextBlock Text="{Binding AvgHealLabel}" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                             </StackPanel>
                             <StackPanel Margin="6,11" HorizontalAlignment="Center">
                                 <TextBlock Text="{Binding AvgResist}" FontSize="16" FontWeight="ExtraBold" Foreground="{DynamicResource Stats.Tx1}" HorizontalAlignment="Center"/>
-                                <TextBlock Text="场均抵挡" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                <TextBlock Text="{Binding AvgResistLabel}" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                             </StackPanel>
                             <StackPanel Margin="6,11" HorizontalAlignment="Center">
                                 <TextBlock Text="{Binding Kda}" FontSize="16" FontWeight="ExtraBold" Foreground="{DynamicResource Stats.Tx1}" HorizontalAlignment="Center"/>
-                                <TextBlock Text="KDA" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                <TextBlock Text="{Binding KdaLabel}" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                             </StackPanel>
                             <StackPanel Margin="6,11" HorizontalAlignment="Center">
                                 <TextBlock Text="{Binding SeasonWinRate}" FontSize="16" FontWeight="ExtraBold" Foreground="{DynamicResource Stats.OkText}" HorizontalAlignment="Center"/>
-                                <TextBlock Text="本赛季胜率" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                <TextBlock Text="{Binding WinRateLabel}" FontSize="11" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                                 <TextBlock Text="{Binding WinLossText}" FontSize="10" Foreground="{DynamicResource Stats.Tx3}" HorizontalAlignment="Center" Margin="0,2,0,0"
                                            Visibility="{Binding HasWinLoss, Converter={StaticResource BoolToVis}}"/>
                             </StackPanel>

@@ -67,7 +67,7 @@
                 <TextBlock Text="数据" Style="{StaticResource Stats.H6}" VerticalAlignment="Bottom"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                             Visibility="{Binding HasPerTen, Converter={StaticResource BoolToVis}}">
-                    <RadioButton x:Name="RbAve" GroupName="StatMode" Content="场均" IsChecked="True"
+                    <RadioButton x:Name="RbAve" GroupName="StatMode" Content="{Binding TotalTabText, Mode=OneWay}" IsChecked="True"
                                  Style="{StaticResource Stats.TabRadio}" Checked="OnStatModeChanged"/>
                     <RadioButton x:Name="RbTen" GroupName="StatMode" Content="每10分钟"
                                  Style="{StaticResource Stats.TabRadio}" Checked="OnStatModeChanged"/>
@@ -84,7 +84,7 @@
                 </ItemsControl>
             </Border>
 
-            <TextBlock x:Name="EmptyHint" Text="该英雄暂无场均明细数据" FontSize="12" Margin="4,10,0,0"
+            <TextBlock x:Name="EmptyHint" Text="该英雄暂无明细数据" FontSize="12" Margin="4,10,0,0"
                        Foreground="{DynamicResource Stats.Tx3}" Visibility="Collapsed"/>
 
         </StackPanel>

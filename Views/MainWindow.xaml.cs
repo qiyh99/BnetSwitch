@@ -72,15 +72,22 @@ public partial class MainWindow : Window
     private void OnOpenSettings(object sender, RoutedEventArgs e) => ShowDimmed(new SettingsWindow(_vm));
     private void OnContact(object sender, RoutedEventArgs e) => ShowDimmed(new ContactWindow(_vm.QQGroupUrl, _vm.GithubUrl));
 
-    // 查战绩:当前登录号(身份卡按钮)/ 指定号(账号卡悬停按钮)。roleId = account_id_lo。
+    // 查战绩:当前登录号(身份卡按钮)/ 指定号(账号卡悬停按钮)。
     private void OnOpenStats(object sender, RoutedEventArgs e)
     {
-        if (_vm.CurrentAccount?.AccountId is long id) Stats.StatsWindow.ShowFor(this, id);
+        if (_vm.CurrentAccount is { } row) OpenStatsFor(row);
     }
 
     private void OnRowStats(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: AccountRow row }) Stats.StatsWindow.ShowFor(this, row.AccountId);
+        if (sender is FrameworkElement { DataContext: AccountRow row }) OpenStatsFor(row);
+    }
+
+    // 按区服分流:国服走网易大神(要扫码,roleId = account_id_lo);国际服/亚服走暴雪官方生涯页(免登录,吃 BattleTag)。
+    private void OpenStatsFor(AccountRow row)
+    {
+        if (row.IsCnRegion) Stats.StatsWindow.ShowFor(this, row.AccountId);
+        else Stats.CareerWindow.ShowFor(this, row.BattleTag);
     }
 
     /// <summary>弹模态窗:主窗盖一层 dim 遮罩(对齐原型 .ov 的 mask)。</summary>
@@ -94,6 +101,8 @@ public partial class MainWindow : Window
 
     // ===== 主操作 =====
     private async void OnRefresh(object sender, RoutedEventArgs e) => await _vm.RefreshAsync();
+
+    private async void OnLaunchClient(object sender, RoutedEventArgs e) => await _vm.LaunchClientAsync();
 
     private async void OnSaveCurrent(object sender, RoutedEventArgs e)
     {
