@@ -340,7 +340,8 @@
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <TextBlock Text="{Binding TotalCountText}" Foreground="{DynamicResource Tx3}" FontSize="12" VerticalAlignment="Center" />
                     <TextBlock Text="去广告" Foreground="{DynamicResource Acc}" FontSize="12" VerticalAlignment="Center" Margin="12,0,0,0"
-                               Cursor="Hand" MouseLeftButtonUp="OnRemoveAd" />
+                               Cursor="Hand" MouseLeftButtonUp="OnRemoveAd"
+                               Visibility="{Binding RemoveAdVisibility}" />
                 </StackPanel>
             </Grid>
         </Border>

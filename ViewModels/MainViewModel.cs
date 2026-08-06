@@ -180,12 +180,13 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             Set(ref _adFree, value);
-            Raise(nameof(AdFreeBadgeVisibility));
+            Raise(nameof(RemoveAdVisibility));
             BottomBanner.RefreshVisibility();
         }
     }
 
-    public Visibility AdFreeBadgeVisibility => _adFree ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>状态栏那个「去广告」入口。付过钱的人右下角就该是干净的,不留任何字。</summary>
+    public Visibility RemoveAdVisibility => _adFree ? Visibility.Collapsed : Visibility.Visible;
 
     public void OpenAdUrl(string? url)
     {
@@ -328,6 +329,10 @@ public sealed class MainViewModel : ObservableObject
         _profiles = new AppDataStore(_paths);
         _controller = new BattleNetController(_paths);
         _license = new LicenseService();
+
+        // 先认本地缓存的授权状态。InitLicenseAsync 排在更新检查和账号刷新后面,
+        // 等它跑完状态栏已经晃过一次「去广告」了 —— 付了钱的人不该看到这一下。
+        _adFree = _settings.AdFreeCached;
 
         BottomBanner = new RotatingAdVM(_settings.BottomAd, () => _adFree);
 
