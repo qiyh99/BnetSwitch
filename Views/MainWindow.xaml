@@ -218,7 +218,7 @@
                                                 <Border x:Name="GoPill" DockPanel.Dock="Right" CornerRadius="8" Background="{DynamicResource AccSoft}" Padding="12,6" VerticalAlignment="Center">
                                                     <StackPanel Orientation="Horizontal">
                                                         <ctrl:IconView x:Name="GoIcon" Geometry="{StaticResource GeoSwitch}" Stroke="{DynamicResource Acc}" Thickness="2" IconSize="14" Margin="0,0,5,0" />
-                                                        <TextBlock x:Name="GoText" Text="切换" Foreground="{DynamicResource Acc}" FontSize="12.5" />
+                                                        <TextBlock x:Name="GoText" Text="{Binding SwitchText, Mode=OneWay}" Foreground="{DynamicResource Acc}" FontSize="12.5" />
                                                     </StackPanel>
                                                 </Border>
                                                 <Button x:Name="DelBtn" DockPanel.Dock="Right" Style="{StaticResource TitleIconButton}"
@@ -238,6 +238,16 @@
                                                             <TextBlock x:Name="RegionTx" Text="{Binding RegionText, Mode=OneWay}" FontSize="10.5"
                                                                        Foreground="{DynamicResource Tx3}" />
                                                         </Border>
+                                                        <!-- 令牌失效的号:标出来,不然用户只会反复白切 -->
+                                                        <Border DockPanel.Dock="Left" CornerRadius="4" Padding="5,1" Margin="0,0,6,0"
+                                                                VerticalAlignment="Center" Background="{DynamicResource WarnBg}"
+                                                                Visibility="{Binding ExpiredVisibility}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <ctrl:IconView Geometry="{StaticResource GeoWarn}" Stroke="{DynamicResource WarnIc}"
+                                                                               Thickness="2.6" IconSize="10" Margin="0,0,3,0" />
+                                                                <TextBlock Text="登录已过期" FontSize="10.5" Foreground="{DynamicResource WarnTx}" />
+                                                            </StackPanel>
+                                                        </Border>
                                                         <TextBlock FontSize="11.5" Foreground="{DynamicResource Tx3}" TextTrimming="CharacterEllipsis">
                                                             <Run Text="{Binding SavedRelative, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding AccountIdText, Mode=OneWay}" />
                                                         </TextBlock>
@@ -250,6 +260,13 @@
                                             <DataTrigger Binding="{Binding IsCnRegion}" Value="False">
                                                 <Setter TargetName="RegionPill" Property="Background" Value="{DynamicResource AccSoft}" />
                                                 <Setter TargetName="RegionTx" Property="Foreground" Value="{DynamicResource Acc}" />
+                                            </DataTrigger>
+                                            <!-- 过期的号按钮换成警告色:它做的事已经不是「切换」了 -->
+                                            <DataTrigger Binding="{Binding IsExpired}" Value="True">
+                                                <Setter TargetName="GoPill" Property="Background" Value="{DynamicResource WarnBg}" />
+                                                <Setter TargetName="GoText" Property="Foreground" Value="{DynamicResource WarnTx}" />
+                                                <Setter TargetName="GoIcon" Property="Geometry" Value="{StaticResource GeoUser}" />
+                                                <Setter TargetName="GoIcon" Property="Stroke" Value="{DynamicResource WarnIc}" />
                                             </DataTrigger>
                                             <Trigger SourceName="CardRoot" Property="IsMouseOver" Value="True">
                                                 <Setter TargetName="CardRoot" Property="BorderBrush" Value="{DynamicResource AccBd}" />

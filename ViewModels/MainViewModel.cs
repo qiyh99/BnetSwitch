@@ -83,6 +83,22 @@ public sealed class AccountRow : ObservableObject
         set { Set(ref _savedAtUtc, value); Raise(nameof(ProfileText)); Raise(nameof(SavedRelative)); }
     }
 
+    private bool _isExpired;
+    /// <summary>
+    /// 上次切过去没登上 —— 这个号的免密令牌已经失效,快照再切也没用,得在战网里重新登录一次再存。
+    /// 由切换后的核对写入,存在 meta.json 里,重开工具仍在;重新保存快照时清掉。
+    /// </summary>
+    public bool IsExpired
+    {
+        get => _isExpired;
+        set { Set(ref _isExpired, value); Raise(nameof(ExpiredVisibility)); Raise(nameof(SwitchText)); }
+    }
+
+    public Visibility ExpiredVisibility => _isExpired ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>过期的号点了也是白点,按钮直接改成把人带去登录页。</summary>
+    public string SwitchText => _isExpired ? "重新登录" : "切换";
+
     // ---- 展示派生 ----
     public string NameOnly { get { var i = BattleTag.IndexOf('#'); return i < 0 ? BattleTag : BattleTag[..i]; } }
     public string HashTag { get { var i = BattleTag.IndexOf('#'); return i < 0 ? "" : BattleTag[i..]; } }
@@ -403,6 +419,12 @@ public sealed class MainViewModel : ObservableObject
     private string _lastIdSet = "";
     private bool _polling;
 
+    /// <summary>切换后留多久等战网真正登进去。冷启动 + 登录握手,20 秒偏紧,给足。</summary>
+    private const int SwitchVerifySeconds = 45;
+
+    private long? _pendingSwitchId;      // 刚切过去、还没确认登录结果的号
+    private DateTime _pendingSwitchUntil;
+
     /// <summary>从磁盘读一次账号列表 + 当前号指针。</summary>
     private Task<(IReadOnlyList<BattleAccount> list, long? active)> ReadAllAsync() =>
         Task.Run(() =>
@@ -441,6 +463,7 @@ public sealed class MainViewModel : ObservableObject
                 IsActive = activeId.HasValue && a.AccountId == activeId.Value,
                 HasProfile = meta != null,
                 SavedAtUtc = meta?.SavedAtUtc,
+                IsExpired = meta?.Expired == true,
             });
         }
 
@@ -456,12 +479,51 @@ public sealed class MainViewModel : ObservableObject
                 IsActive = true,
                 HasProfile = meta != null,
                 SavedAtUtc = meta?.SavedAtUtc,
+                IsExpired = meta?.Expired == true,
             });
         }
 
         _lastActiveId = activeId;
         _lastIdSet = string.Join(",", Accounts.Select(r => r.AccountId).OrderBy(x => x));
         RebuildGroups();
+    }
+
+    /// <summary>
+    /// 核对上一次切换到底登上了谁。战网自己会把真正登录的账号写进 CachedData.db 的指针
+    /// (那个库在 %LOCALAPPDATA%,不在快照还原的 %APPDATA% 里,所以读到的是战网的结果、
+    /// 不是我们刚写进去的愿望)。到点还没登上目标号 = 令牌失效,把这个号标成过期。
+    /// </summary>
+    private async Task VerifySwitchAsync(long targetId)
+    {
+        var active = await Task.Run(() => _reader.ReadActiveAccountId());
+
+        if (active == targetId)
+        {
+            _pendingSwitchId = null;
+            var row = Accounts.FirstOrDefault(a => a.AccountId == targetId);
+            if (row is { IsExpired: true })
+            {
+                await Task.Run(() => _profiles.SetExpired(targetId, false));
+                row.IsExpired = false;
+                RebuildGroups();
+            }
+            return;
+        }
+
+        if (DateTime.UtcNow < _pendingSwitchUntil) return;   // 还在等,战网可能只是起得慢
+        _pendingSwitchId = null;
+
+        // 战网压根没起来就别下结论(用户可能自己把它关了),下次再说
+        if (!ClientRunning) return;
+
+        var target = Accounts.FirstOrDefault(a => a.AccountId == targetId);
+        await Task.Run(() => _profiles.SetExpired(targetId, true));
+        if (target is not null)
+        {
+            target.IsExpired = true;
+            RebuildGroups();
+            StatusText = $"「{target.BattleTag}」的登录已过期,免密令牌失效了。点它的『重新登录』,登进去后再存一次快照。";
+        }
     }
 
     /// <summary>记下 CachedData.db 当前的文件戳,避免轮询白读一遍。</summary>
@@ -483,6 +545,11 @@ public sealed class MainViewModel : ObservableObject
     {
         // 按钮文案得跟着战网开没开走,不能被下面那一串提前 return 挡掉
         ClientRunning = await Task.Run(() => _controller.IsClientRunning());
+
+        // 切换结果的核对也得放在这里:切成功时 activeId 正好等于轮询基线,下面那句
+        // 「没变就 return」会把它整个跳过,核对永远等不到结果、最后误判成过期。
+        if (_pendingSwitchId is long pending && !Busy)
+            await VerifySwitchAsync(pending);
 
         if (_polling || Busy || !_paths.Exists) return;
         _polling = true;
@@ -513,7 +580,10 @@ public sealed class MainViewModel : ObservableObject
             var knownBefore = new HashSet<long>(Accounts.Select(r => r.AccountId));
             ApplyAccounts(list, activeId);
 
-            if (CurrentAccount is { } cur && !knownBefore.Contains(cur.AccountId))
+            // 过期的号刚被重新登进来:快照还是旧的,不重存下次切过去照样失败,这句得说清楚
+            if (CurrentAccount is { IsExpired: true } exp)
+                StatusText = $"「{exp.BattleTag}」已重新登录。请点左侧『保存当前为快照』更新它的快照,否则下次切换仍会失败。";
+            else if (CurrentAccount is { } cur && !knownBefore.Contains(cur.AccountId))
                 StatusText = $"检测到新登录的账号「{cur.BattleTag}」,点左侧『保存当前为快照』把它存下来。";
             else if (CurrentAccount is { } c2)
                 StatusText = $"当前登录账号已变为「{c2.BattleTag}」。";
@@ -629,6 +699,7 @@ public sealed class MainViewModel : ObservableObject
             await Task.Run(() => _profiles.Save(active.AccountId, active.BattleTag));
             active.HasProfile = true;
             active.SavedAtUtc = DateTime.UtcNow;
+            active.IsExpired = false;   // 刚存的快照配的是刚登进去的令牌,过期标记作废
             RebuildGroups();
 
             StatusText = "正在重新启动战网…";
@@ -676,6 +747,7 @@ public sealed class MainViewModel : ObservableObject
                     StatusText = $"正在更新当前号「{curRow.BattleTag}」的快照…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
                     curRow.SavedAtUtc = DateTime.UtcNow;
+                    curRow.IsExpired = false;   // 它刚才还登着,令牌显然是好的
                 }
             }
 
@@ -689,12 +761,69 @@ public sealed class MainViewModel : ObservableObject
                 a.IsActive = a.AccountId == target.AccountId;
             _lastActiveId = target.AccountId;   // 对齐轮询基线,免得战网写完指针后又报一次"当前账号已变"
             RebuildGroups();
-            StatusText = $"已切换到「{target.BattleTag}」,战网正在启动。若仍是上一个号,请刷新/重开战网。";
+
+            // 还原的只是「当前是哪个号」的指针,能不能免密登进去取决于注册表里的令牌还在不在。
+            // 交给轮询去核对战网真正登上了谁 —— 令牌没了的话这里一切正常,人是在几十秒后才发现的。
+            _pendingSwitchId = target.AccountId;
+            _pendingSwitchUntil = DateTime.UtcNow.AddSeconds(SwitchVerifySeconds);
+            StatusText = $"已切换到「{target.BattleTag}」,战网正在启动,正在确认登录结果…";
         }
         catch (Exception ex)
         {
             StatusText = "切换失败:" + ex.Message;
             MessageBox.Show(ex.Message, "切换失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    /// <summary>
+    /// 过期账号的「重新登录」:先把当前号存好,再回登录页让用户手动登一次那个号。
+    /// 过期标记不在这里清 —— 得等用户真的重存了快照才算修好,不然只是把警告藏起来。
+    /// </summary>
+    public async Task ReloginAsync(AccountRow row)
+    {
+        if (Busy) return;
+        Busy = true;
+        try
+        {
+            StatusText = "正在关闭战网…";
+            var currentId = await Task.Run(() => _reader.ReadActiveAccountId());
+            var stopped = await Task.Run(() => _controller.GracefulQuit());
+            if (!stopped)
+                throw new InvalidOperationException("战网未能完全退出,请从托盘右键『退出』战网后重试。");
+
+            // 顺手把当前号存一遍:等下要清指针回登录页,现在不存,它的快照就停在上一次保存的状态
+            if (currentId is long cur && cur != row.AccountId)
+            {
+                var curRow = Accounts.FirstOrDefault(a => a.AccountId == cur);
+                if (curRow is { HasProfile: true })
+                {
+                    StatusText = $"正在保存当前号「{curRow.BattleTag}」…";
+                    await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
+                    curRow.SavedAtUtc = DateTime.UtcNow;
+                    curRow.IsExpired = false;
+                }
+            }
+
+            StatusText = "正在回到登录页(未登出)…";
+            await Task.Run(() => _profiles.ClearCurrentPointer());
+            await Task.Run(() => _controller.LaunchClient());
+
+            foreach (var a in Accounts) a.IsActive = false;
+            _lastActiveId = null;
+            _dbStamp = "";
+            _pendingSwitchId = null;   // 这不是一次切换,别让核对逻辑把它算成失败
+            RebuildGroups();
+
+            StatusText = $"已回到登录页。请在战网里登录「{row.BattleTag}」,登录成功后点左侧『保存当前为快照』更新它的快照。";
+        }
+        catch (Exception ex)
+        {
+            StatusText = "出错:" + ex.Message;
+            MessageBox.Show(ex.Message, "重新登录失败", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {

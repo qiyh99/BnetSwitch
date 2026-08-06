@@ -147,8 +147,22 @@ public partial class MainWindow : Window
 
     private async void OnSwitchCard(object sender, MouseButtonEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: AccountRow row })
-            await _vm.SwitchToAsync(row);
+        if (sender is not FrameworkElement { DataContext: AccountRow row }) return;
+
+        // 令牌已失效的号,切过去只会白关一次战网。直接带他去登录页。
+        if (row.IsExpired)
+        {
+            var ok = MessageBox.Show(
+                $"「{row.BattleTag}」的免密令牌已失效,直接切换会登不上。\n\n" +
+                "现在关闭战网并回到登录页,你手动登录这个账号一次,再点『保存当前为快照』即可恢复。\n\n" +
+                "当前登录的账号会先自动存好,不受影响。",
+                "重新登录", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (ok != MessageBoxResult.OK) return;
+            await _vm.ReloginAsync(row);
+            return;
+        }
+
+        await _vm.SwitchToAsync(row);
     }
 
     private void OnSaveHint(object sender, MouseButtonEventArgs e)

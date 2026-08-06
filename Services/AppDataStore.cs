@@ -4,7 +4,12 @@ using System.Text.RegularExpressions;
 
 namespace BnetSwitch.Services;
 
-public sealed record AccountProfileMeta(long AccountId, string BattleTag, DateTime SavedAtUtc);
+/// <summary>
+/// <paramref name="Expired"/>:上次切过去没登上。免密令牌在注册表里、本工具从不碰,
+/// 令牌被暴雪作废(或用户在战网点了退出登录)之后,快照就只是一个指向空处的指针 ——
+/// 切过去战网只会退回登录页或上一个号。老 meta.json 没这个字段,反序列化取默认 false。
+/// </summary>
+public sealed record AccountProfileMeta(long AccountId, string BattleTag, DateTime SavedAtUtc, bool Expired = false);
 
 /// <summary>
 /// 账号切换的正确机制(实测验证):
@@ -75,6 +80,20 @@ public sealed class AppDataStore
         Directory.CreateDirectory(_paths.RoamingDir);
         foreach (var f in Directory.EnumerateFiles(data))
             ForceCopy(f, Path.Combine(_paths.RoamingDir, Path.GetFileName(f)));
+    }
+
+    /// <summary>
+    /// 标记 / 清除「登录已过期」。只改 meta.json,不动快照文件本身 ——
+    /// 用户可能只是暂时登不上,别把他好不容易存下来的文件删了。
+    /// </summary>
+    public void SetExpired(long accountId, bool expired)
+    {
+        var meta = ReadMeta(accountId);
+        if (meta is null || meta.Expired == expired) return;
+        File.WriteAllText(
+            MetaFile(accountId),
+            JsonSerializer.Serialize(meta with { Expired = expired },
+                new JsonSerializerOptions { WriteIndented = true }));
     }
 
     /// <summary>删除某账号的快照(从本工具移除,不影响战网)。</summary>
