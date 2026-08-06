@@ -83,6 +83,12 @@ public sealed class AppSettings
     /// <summary>版本更新检测接口:返回 {version,notes,url} 的 JSON 地址。留空则「检测更新」只显示当前版本。</summary>
     public string UpdateUrl { get; set; } = "https://api.qiyonghan.icu/api/version";
 
+    /// <summary>
+    /// 已经弹过「有新版」提示的版本号。非强制的新版每个只打断用户一次,
+    /// 之后就只在标题栏挂个小标 —— 每次启动都弹,和强制更新没差多少。
+    /// </summary>
+    public string? UpdateNoticeShownFor { get; set; }
+
     // ---- 广告位(改 settings.json 即可,不用重编译;正式由后端 /api/ads 下发)----
 
     /// <summary>开屏弹窗广告(启动弹一次,可关)。</summary>

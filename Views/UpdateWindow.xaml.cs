@@ -3,17 +3,26 @@ using BnetSwitch.Services;
 
 namespace BnetSwitch;
 
-/// <summary>强制更新窗:开启时若检测到新版本,挡在主界面前,只能「立即更新」或「退出程序」。</summary>
-public partial class ForcedUpdateWindow : Window
+/// <summary>
+/// 新版本提示窗。两种形态由后端的 mandatory 决定:
+/// 强制 —— 挡在主界面前,只能「立即更新」或「退出程序」;
+/// 非强制 —— 「稍后再说」直接关掉进主界面,同一个版本不会再弹第二次。
+/// </summary>
+public partial class UpdateWindow : Window
 {
     private readonly UpdateInfo _info;
 
-    public ForcedUpdateWindow(UpdateInfo info)
+    public UpdateWindow(UpdateInfo info)
     {
         InitializeComponent();
         _info = info;
         VerText.Text = $"新版本 {info.LatestVersion} 已发布";
         NotesText.Text = string.IsNullOrWhiteSpace(info.Notes) ? "修复与优化。" : info.Notes;
+
+        ExitBtn.Content = info.Mandatory ? "退出程序" : "稍后再说";
+        HintText.Text = info.Mandatory
+            ? "本次为必要更新,完成更新后方可继续使用。"
+            : "可稍后更新。标题栏「新版」入口随时可再次打开此窗口。";
     }
 
     /// <summary>主备源依次下载 → 校验 sha256 → 运行安装包 → 退出让其替换重启。</summary>
@@ -72,5 +81,11 @@ public partial class ForcedUpdateWindow : Window
         Bar.Visibility = Visibility.Collapsed;
     }
 
-    private void OnExit(object sender, RoutedEventArgs e) => Application.Current.Shutdown();
+    /// <summary>强制版本这个键是「退出程序」;非强制是「稍后再说」,只关窗、放人进主界面。</summary>
+    private void OnExit(object sender, RoutedEventArgs e)
+    {
+        if (_info.Mandatory) { Application.Current.Shutdown(); return; }
+        DialogResult = false;
+        Close();
+    }
 }

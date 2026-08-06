@@ -29,6 +29,18 @@
                 <TextBlock DockPanel.Dock="Left" Text="战网账号切换管理器" VerticalAlignment="Center"
                            Foreground="{DynamicResource Tx1}" FontSize="13" />
 
+                <!-- 非强制的新版只在这挂个小标,不拦人。强制版本压根走不到主界面,不会出现在这。 -->
+                <Button DockPanel.Dock="Left" Style="{StaticResource TitleIconButton}" Width="Auto" Padding="8,0" Margin="12,0,0,0"
+                        Click="OnOpenUpdate" Visibility="{Binding UpdateBadgeVisibility}"
+                        WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="查看更新说明并升级">
+                    <Border Background="{DynamicResource AccSoft}" CornerRadius="9" Padding="8,2">
+                        <StackPanel Orientation="Horizontal">
+                            <ctrl:IconView Geometry="{StaticResource GeoDownload}" Stroke="{DynamicResource Acc}" Thickness="2" IconSize="12" Margin="0,0,4,0" />
+                            <TextBlock Text="{Binding UpdateBadgeText}" Foreground="{DynamicResource Acc}" FontSize="11.5" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                </Button>
+
                 <Button DockPanel.Dock="Right" Style="{StaticResource TitleIconButton}" Click="OnCloseClick"
                         WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="关闭">
                     <ctrl:IconView Geometry="{StaticResource GeoX}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="15" />

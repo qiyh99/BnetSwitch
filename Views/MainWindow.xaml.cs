@@ -31,7 +31,11 @@ public partial class MainWindow : Window
 
         Loaded += async (_, _) =>
         {
-            if (!await UpdateGateAsync()) return;   // 强制更新门:有新版必须更新完才进主界面
+            // 活跃上报必须排在更新提示前面:放后面的话,被强制更新挡下来直接退出的人一个都不会上报,
+            // 等于统计里看不见强更劝退了多少人 —— 这个数以前是瞎的。
+            Analytics.Ping();
+
+            if (!await UpdateGateAsync()) return;   // 只有 mandatory 版本会在这里拦住不放行
             StartShowListener();
             await _vm.RefreshAsync();
             _watchTimer.Tick += async (_, _) => await _vm.PollAccountsAsync();
@@ -45,7 +49,10 @@ public partial class MainWindow : Window
         };
     }
 
-    /// <summary>开启时检测更新:有新版就弹强制更新窗(必须更新或退出),没有/检查失败则放行。返回 true=放行进主界面。</summary>
+    /// <summary>
+    /// 开启时检测更新。强制版本挡在主界面外(必须更新或退出);非强制版本每个只弹一次提示,
+    /// 关掉后只在标题栏留个小标。返回 true=放行进主界面。
+    /// </summary>
     private async Task<bool> UpdateGateAsync()
     {
         DimOverlay.Visibility = Visibility.Visible;   // 检查期间盖住主界面
@@ -59,9 +66,30 @@ public partial class MainWindow : Window
             return true;   // 没更新 / 检查失败(连不上)→ 放行,别把人锁在外面
         }
 
-        new ForcedUpdateWindow(info) { Owner = this }.ShowDialog();   // 更新成功会退出装新版;退出会关掉 app
-        Application.Current.Shutdown();   // 强制:有更新就不进主界面(兜底再退一次,防 Alt+F4 绕过)
-        return false;
+        if (info.Mandatory)
+        {
+            new UpdateWindow(info) { Owner = this }.ShowDialog();   // 更新成功会退出装新版;退出会关掉 app
+            Application.Current.Shutdown();   // 兜底再退一次,防 Alt+F4 绕过
+            return false;
+        }
+
+        // 非强制:小标常驻,提示窗每个版本只打断一次
+        _vm.PendingUpdate = info;
+        if (_vm.Settings.UpdateNoticeShownFor != info.LatestVersion)
+        {
+            _vm.Settings.UpdateNoticeShownFor = info.LatestVersion;
+            _vm.Settings.Save();
+            new UpdateWindow(info) { Owner = this }.ShowDialog();
+        }
+
+        DimOverlay.Visibility = Visibility.Collapsed;
+        return true;
+    }
+
+    /// <summary>点标题栏那个「新版 x.y.z」小标:重新打开更新说明窗。</summary>
+    private void OnOpenUpdate(object sender, RoutedEventArgs e)
+    {
+        if (_vm.PendingUpdate is { } info) ShowDimmed(new UpdateWindow(info));
     }
 
     // ===== 标题栏 =====

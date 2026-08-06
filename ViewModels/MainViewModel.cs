@@ -202,6 +202,23 @@ public sealed class MainViewModel : ObservableObject
     public string QQGroupUrl => _settings.QQGroupUrl;
     public string GithubUrl => _settings.GithubUrl;
 
+    // ---- 新版提示 ----
+    private UpdateInfo? _pendingUpdate;
+    /// <summary>检测到但还没装的新版(仅非强制版本会走到这)。标题栏那个小标靠它显示。</summary>
+    public UpdateInfo? PendingUpdate
+    {
+        get => _pendingUpdate;
+        set
+        {
+            Set(ref _pendingUpdate, value);
+            Raise(nameof(UpdateBadgeVisibility));
+            Raise(nameof(UpdateBadgeText));
+        }
+    }
+
+    public Visibility UpdateBadgeVisibility => _pendingUpdate is null ? Visibility.Collapsed : Visibility.Visible;
+    public string UpdateBadgeText => _pendingUpdate is null ? "" : "新版 " + _pendingUpdate.LatestVersion;
+
     public void ApplyActivation(string code)
     {
         _settings.LicenseCode = code;
@@ -226,7 +243,6 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>从服务器拉广告配置覆盖本地(可后台随时换广告);拉不到就沿用本地缓存(离线兜底)。</summary>
     public async Task LoadServerAdsAsync()
     {
-        Analytics.Ping();   // 启动活跃上报(日活/留存)
         if (!string.IsNullOrWhiteSpace(_settings.ApiBaseUrl))
         {
             try

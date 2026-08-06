@@ -5,8 +5,8 @@ using System.Text.Json;
 
 namespace BnetSwitch.Services;
 
-/// <summary>版本检测结果。</summary>
-public sealed record UpdateInfo(bool HasUpdate, string LatestVersion, string Notes, string Url, string UrlBackup, string Sha256);
+/// <summary>版本检测结果。<paramref name="Mandatory"/>=true 才把人挡在主界面外。</summary>
+public sealed record UpdateInfo(bool HasUpdate, string LatestVersion, string Notes, string Url, string UrlBackup, string Sha256, bool Mandatory);
 
 /// <summary>向 UpdateUrl 拉 {version,notes,url,sha256},和当前版本比较;并负责下载新版安装包 + 校验。</summary>
 public static class UpdateService
@@ -26,9 +26,11 @@ public static class UpdateService
             var url = root.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
             var urlBackup = root.TryGetProperty("urlBackup", out var u2) ? u2.GetString() ?? "" : "";
             var sha = root.TryGetProperty("sha256", out var s) ? s.GetString() ?? "" : "";
+            // 字段缺失(老服务端)按「不强制」算:漏挡一次远好过把人白白挡在门外
+            var mandatory = root.TryGetProperty("mandatory", out var m) && m.ValueKind == JsonValueKind.True;
             if (string.IsNullOrWhiteSpace(latest)) return null;
 
-            return new UpdateInfo(Compare(latest, currentVersion) > 0, latest, notes, url, urlBackup, sha);
+            return new UpdateInfo(Compare(latest, currentVersion) > 0, latest, notes, url, urlBackup, sha, mandatory);
         }
         catch { return null; }
     }
