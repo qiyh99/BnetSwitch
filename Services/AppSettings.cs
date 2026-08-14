@@ -74,6 +74,13 @@ public sealed class AppSettings
     /// 只影响本工具显示,绝不动战网 / 不登出;该号若重新登录会自动从这里移除并再次出现。</summary>
     public List<long> HiddenAccountIds { get; set; } = new();
 
+    /// <summary>用户给账号写的备注,key = account_id 的字符串形式(JSON 对象键只能是字符串)。
+    /// 存这儿而不是快照的 meta.json:没存过快照的号也要能写备注、也要能被搜到。</summary>
+    public Dictionary<string, string> AccountNotes { get; set; } = new();
+
+    /// <summary>置顶的账号 id。只影响排序,在各自分组内排到最前。</summary>
+    public List<long> PinnedAccountIds { get; set; } = new();
+
     /// <summary>「联系开发者」弹窗:QQ 交流群链接。</summary>
     public string QQGroupUrl { get; set; } = "https://qm.qq.com/q/3SeTEXIIGI";
 

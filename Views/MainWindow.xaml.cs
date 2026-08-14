@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using BnetSwitch.Services;
+using BnetSwitch.Services.Overwatch;
 using BnetSwitch.ViewModels;
 
 namespace BnetSwitch;
@@ -23,6 +24,14 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = _vm;
         SetupTray();
+
+        // 刷段位时国服号要网易大神会话。VM 不该自己 new Window,扫码入口由界面层给。
+        _vm.CnAuthProvider = async () =>
+        {
+            var client = await DashenAuth.GetAliveAsync();
+            if (client is not null) return client;
+            return ShowDimmed(new Stats.QrLoginDialog()) == true ? DashenAuth.Current : null;
+        };
 
         // 记住用户上次调的窗口大小;首次启动默认最小尺寸。
         Width = _vm.Settings.WindowWidth >= MinWidth ? _vm.Settings.WindowWidth : MinWidth;
@@ -145,9 +154,31 @@ public partial class MainWindow : Window
             await _vm.AddAccountAsync();
     }
 
+    /// <summary>记住这次左键是在哪张卡片上按下的:只认「按下和抬起在同一张卡」的点击。</summary>
+    private AccountRow? _pressedRow;
+
+    /// <summary>
+    /// 右键菜单是否开着。实测:点空白处关菜单的那一下左键会**整个**(按下 + 抬起)落到卡片上,
+    /// 不拦就变成误切号;而 ContextMenu.Closed 是异步派发的,等它到已经晚了 —— 所以用 Opened 立的旗子来判。
+    /// </summary>
+    private bool _menuOpen;
+
+    private void OnCardDown(object sender, MouseButtonEventArgs e)
+    {
+        _pressedRow = (sender as FrameworkElement)?.DataContext as AccountRow;
+    }
+
+    private void OnCardMenuOpened(object sender, RoutedEventArgs e) => _menuOpen = true;
+    private void OnCardMenuClosed(object sender, RoutedEventArgs e) => _menuOpen = false;
+
     private async void OnSwitchCard(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: AccountRow row }) return;
+
+        var pressed = _pressedRow;
+        _pressedRow = null;
+        if (!ReferenceEquals(pressed, row)) return;   // 不是从这张卡按下去的,不算点击
+        if (_menuOpen) { _menuOpen = false; return; }   // 这一下只是把右键菜单点掉,不是要切号
 
         // 令牌已失效的号,切过去只会白关一次战网。直接带他去登录页。
         if (row.IsExpired)
@@ -191,6 +222,26 @@ public partial class MainWindow : Window
                 _vm.HideAccount(row);
         }
     }
+
+    // ===== 备注 / 置顶 / 搜索 / 段位 =====
+
+    /// <summary>右键菜单「编辑备注」。空串 = 清掉备注。</summary>
+    private void OnEditNote(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: AccountRow row }) return;
+        var dlg = new NoteWindow(row.BattleTag, row.Note);
+        if (ShowDimmed(dlg) == true) _vm.SetNote(row, dlg.Note);
+    }
+
+    private void OnTogglePin(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: AccountRow row }) _vm.TogglePin(row);
+    }
+
+    private void OnClearSearch(object sender, RoutedEventArgs e) => _vm.SearchText = "";
+
+    /// <summary>顶部「刷新段位」:唯一会为段位联网的入口(启动和轮询都不查)。</summary>
+    private async void OnRefreshRanks(object sender, RoutedEventArgs e) => await _vm.RefreshRanksAsync();
 
     private void OnBottomBannerClick(object sender, MouseButtonEventArgs e)
     {

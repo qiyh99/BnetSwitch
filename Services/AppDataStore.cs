@@ -41,6 +41,73 @@ public sealed class AppDataStore
     private string DataDir(long id) => Path.Combine(Dir(id), "BattleNet");
     private string MetaFile(long id) => Path.Combine(Dir(id), "meta.json");
 
+    /// <summary>该账号在 CachedData.db 里的活跃指针(features_cached_data_points)备份,切换时写回 %LOCALAPPDATA%。</summary>
+    private string PointerFile(long id) => Path.Combine(Dir(id), "cacheddata_pointer.json");
+
+    /// <summary>把该账号的活跃指针 JSON 存进快照目录(空则不写,保留旧值)。</summary>
+    public void SavePointer(long id, string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return;
+        Directory.CreateDirectory(Dir(id));
+        File.WriteAllText(PointerFile(id), json);
+    }
+
+    /// <summary>读该账号存下的活跃指针 JSON;没有则 null。</summary>
+    public string? ReadPointer(long id)
+    {
+        var f = PointerFile(id);
+        return File.Exists(f) ? File.ReadAllText(f) : null;
+    }
+
+    /// <summary>该账号存快照那一刻的 UnifiedAuth 全部令牌槽(槽名 → base64)。切同邮箱的号时用来把令牌写回。</summary>
+    private string TokensFile(long id) => Path.Combine(Dir(id), "uauth.json");
+
+    /// <summary>把当前注册表里的令牌槽随快照一起存下(空则不写,保留旧值)。</summary>
+    public void SaveTokens(long id, IReadOnlyDictionary<string, byte[]> slots)
+    {
+        if (slots.Count == 0) return;
+        Directory.CreateDirectory(Dir(id));
+        var dto = slots.ToDictionary(kv => kv.Key, kv => Convert.ToBase64String(kv.Value));
+        File.WriteAllText(TokensFile(id),
+            JsonSerializer.Serialize(dto, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    /// <summary>读该账号存下的令牌槽;没有就是空字典。</summary>
+    public Dictionary<string, byte[]> ReadTokens(long id)
+    {
+        var map = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        var f = TokensFile(id);
+        if (!File.Exists(f)) return map;
+        try
+        {
+            var dto = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(f));
+            if (dto is not null)
+                foreach (var kv in dto)
+                    map[kv.Key] = Convert.FromBase64String(kv.Value);
+        }
+        catch { }
+        return map;
+    }
+
+    /// <summary>该账号快照里的登录名(SavedAccountNames 第一项)。</summary>
+    public string? ReadLoginName(long id) => ExtractLoginName(Path.Combine(DataDir(id), "Battle.net.config"));
+
+    /// <summary>当前 live 配置里的登录名(SavedAccountNames 第一项)。</summary>
+    public string? ReadLiveLoginName() => ExtractLoginName(_paths.RoamingConfig);
+
+    private static string? ExtractLoginName(string cfg)
+    {
+        if (!File.Exists(cfg)) return null;
+        try
+        {
+            var m = Regex.Match(File.ReadAllText(cfg), "\"SavedAccountNames\"\\s*:\\s*\"([^\"]*)\"");
+            if (!m.Success) return null;
+            var first = m.Groups[1].Value.Split(',')[0].Trim();
+            return string.IsNullOrEmpty(first) ? null : first;
+        }
+        catch { return null; }
+    }
+
     public bool HasProfile(long id) => File.Exists(MetaFile(id));
 
     public AccountProfileMeta? ReadMeta(long id)

@@ -244,4 +244,26 @@ public sealed class OwMappings
         if (string.IsNullOrEmpty(rankNameEn) || rankNameEn == "None") return ("未定级", null);
         return RankTable.TryGetValue(rankNameEn, out var v) ? (v.Cn, v.Brush) : (rankNameEn, "Stats.TierDiamond");
     }
+
+    /// <summary>档位由低到高。RankTable 是字典没有顺序,比高低得靠这份显式排序。</summary>
+    private static readonly string[] TierAsc =
+    {
+        "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Master", "Grandmaster", "Champion",
+    };
+
+    /// <summary>档位高低序:青铜 0 → 英杰 7。认不出来返回 -1。</summary>
+    public static int TierOrder(string? rankNameEn)
+    {
+        if (string.IsNullOrEmpty(rankNameEn)) return -1;
+        return Array.FindIndex(TierAsc, t => string.Equals(t, rankNameEn, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>中文档位名反查英文键(「钻石」→ Diamond)。给只拿得到中文文案的调用方用,查不到返回 null。</summary>
+    public static string? TierEnFromCn(string? cn)
+    {
+        if (string.IsNullOrWhiteSpace(cn)) return null;
+        foreach (var kv in RankTable)
+            if (kv.Value.Cn == cn) return kv.Key;
+        return null;
+    }
 }

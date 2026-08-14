@@ -189,18 +189,68 @@
                 <Grid Grid.Column="2">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,10">
-                        <TextBlock Text="可秒切" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Tx1}" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding ReadyCountText}" FontSize="12" Foreground="{DynamicResource Tx3}" VerticalAlignment="Center" Margin="8,0,0,0" />
-                        <Button Style="{StaticResource TitleIconButton}" Click="OnRefresh" ToolTip="刷新" HorizontalAlignment="Right" Margin="8,0,0,0">
+                    <!-- 搜索:名字 / 备注 / 段位,边打边过滤(纯内存重排,不读库不联网)-->
+                    <Border Grid.Row="0" Margin="2,0,2,10" Height="32" CornerRadius="8" Padding="10,0"
+                            Background="{DynamicResource Input}" BorderBrush="{DynamicResource InputBd}" BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ctrl:IconView Grid.Column="0" Geometry="{StaticResource GeoSearch}" Stroke="{DynamicResource Tx3}"
+                                           Thickness="2.4" IconSize="13" VerticalAlignment="Center" Margin="0,0,7,0" />
+                            <TextBox x:Name="SearchBox" Grid.Column="1" BorderThickness="0" Background="Transparent"
+                                     Foreground="{DynamicResource Tx1}" CaretBrush="{DynamicResource Tx1}" FontSize="12.5"
+                                     VerticalContentAlignment="Center" Padding="0"
+                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Grid.Column="1" Text="搜索名字 / 备注 / 段位" FontSize="12.5" IsHitTestVisible="False"
+                                       Foreground="{DynamicResource Tx3}" VerticalAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Text, ElementName=SearchBox}" Value="" />
+                                                    <Condition Binding="{Binding IsKeyboardFocused, ElementName=SearchBox}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <Button Grid.Column="2" Style="{StaticResource TitleIconButton}" Width="20" Height="20"
+                                    Click="OnClearSearch" ToolTip="清空" Visibility="{Binding ClearSearchVisibility}">
+                                <ctrl:IconView Geometry="{StaticResource GeoX}" Stroke="{DynamicResource Tx3}" Thickness="2.6" IconSize="9" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <!-- 用 DockPanel:两个按钮钉在右边,中间那条段位进度提示自己吃掉剩下的宽度并截断,
+                         不会把按钮顶出可视区(Dock=Right 先声明的在最右,所以「刷新段位」写在前面)-->
+                    <DockPanel Grid.Row="1" Margin="2,2,2,10">
+                        <TextBlock DockPanel.Dock="Left" Text="可秒切" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Tx1}" VerticalAlignment="Center" />
+                        <TextBlock DockPanel.Dock="Left" Text="{Binding ReadyCountText}" FontSize="12" Foreground="{DynamicResource Tx3}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                        <Button DockPanel.Dock="Right" Style="{StaticResource TitleIconButton}" Click="OnRefreshRanks" IsEnabled="{Binding NotBusy}"
+                                ToolTip="刷新段位(要联网查询;国服号需要扫码登录网易大神)">
+                            <ctrl:IconView Geometry="{StaticResource GeoChart}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="15" />
+                        </Button>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource TitleIconButton}" Click="OnRefresh" ToolTip="刷新" Margin="8,0,0,0">
                             <ctrl:IconView Geometry="{StaticResource GeoRefresh}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="16" />
                         </Button>
-                    </StackPanel>
+                        <TextBlock Text="{Binding RankStatusText}" Visibility="{Binding RankStatusVisibility}"
+                                   ToolTip="{Binding RankStatusText}" FontSize="11.5" Foreground="{DynamicResource Tx3}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right" Margin="12,0,4,0"
+                                   TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
 
-                    <ScrollViewer x:Name="RightScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer x:Name="RightScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="RightStack">
                             <ItemsControl ItemsSource="{Binding ReadyAccounts}">
                                 <ItemsControl.ItemTemplate>
@@ -209,7 +259,15 @@
                                                 Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
                                                 Background="{DynamicResource Card}" BorderBrush="{DynamicResource Bd3}"
                                                 BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="0,0,0,8" Cursor="Hand"
-                                                MouseLeftButtonUp="OnSwitchCard">
+                                                MouseLeftButtonDown="OnCardDown" MouseLeftButtonUp="OnSwitchCard">
+                                            <Border.ContextMenu>
+                                                <ContextMenu Style="{StaticResource CardMenu}" Opened="OnCardMenuOpened" Closed="OnCardMenuClosed">
+                                                    <MenuItem Style="{StaticResource CardMenuItem}" Header="编辑备注" Click="OnEditNote" />
+                                                    <MenuItem Style="{StaticResource CardMenuItem}" Header="{Binding PinMenuText}" Click="OnTogglePin" />
+                                                    <Separator Style="{StaticResource CardMenuSeparator}" />
+                                                    <MenuItem Style="{StaticResource CardMenuItemDanger}" Header="删除此快照" Click="OnDeleteCard" />
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
                                             <DockPanel>
                                                 <Border DockPanel.Dock="Left" Width="38" Height="38" CornerRadius="19" Background="{Binding AvatarBg}">
                                                     <TextBlock Text="{Binding AvatarText}" Foreground="{Binding AvatarFg}" FontSize="15" FontWeight="SemiBold"
@@ -227,11 +285,29 @@
                                                     <ctrl:IconView x:Name="DelIcon" Geometry="{StaticResource GeoDelete}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="15" />
                                                 </Button>
                                                 <StackPanel Margin="11,0" VerticalAlignment="Center">
-                                                    <TextBlock FontSize="13.5" FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Tx1}">
-                                                        <Run Text="{Binding NameOnly, Mode=OneWay}" /><Run Text="{Binding HashTag, Mode=OneWay}" Foreground="{DynamicResource Tx3}" />
-                                                    </TextBlock>
+                                                    <DockPanel>
+                                                        <ctrl:IconView DockPanel.Dock="Left" Geometry="{StaticResource GeoPin}" Stroke="{DynamicResource Acc}"
+                                                                       Thickness="2.4" IconSize="11" VerticalAlignment="Center" Margin="0,0,4,0"
+                                                                       Visibility="{Binding PinVisibility}" />
+                                                        <TextBlock DockPanel.Dock="Left" FontSize="13.5" FontWeight="Medium" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Tx1}">
+                                                            <Run Text="{Binding NameOnly, Mode=OneWay}" /><Run Text="{Binding HashTag, Mode=OneWay}" Foreground="{DynamicResource Tx3}" />
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Note, Mode=OneWay}" Visibility="{Binding NoteVisibility}"
+                                                                   FontSize="11.5" Foreground="{DynamicResource Tx3}" VerticalAlignment="Center"
+                                                                   Margin="7,1,0,0" TextTrimming="CharacterEllipsis" />
+                                                    </DockPanel>
                                                     <DockPanel Margin="0,2,0,0">
                                                         <Ellipse DockPanel.Dock="Left" Width="6" Height="6" Fill="{DynamicResource Fresh}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                        <!-- 段位 pill:只显示最高的那个定位,Tooltip 里给全量 -->
+                                                        <Border DockPanel.Dock="Left" CornerRadius="4" Padding="4,1" Margin="0,0,6,0"
+                                                                VerticalAlignment="Center" Background="{DynamicResource TagBg}"
+                                                                Visibility="{Binding RankVisibility}" ToolTip="{Binding RankTip}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Image Source="{Binding RankIcon}" Width="13" Height="13" Margin="0,0,3,0" VerticalAlignment="Center" />
+                                                                <TextBlock Text="{Binding RankText, Mode=OneWay}" FontSize="10.5"
+                                                                           Foreground="{Binding RankBrush}" VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                        </Border>
                                                         <Border x:Name="RegionPill" DockPanel.Dock="Left" CornerRadius="4" Padding="5,1" Margin="0,0,6,0"
                                                                 VerticalAlignment="Center" Background="{DynamicResource TagBg}"
                                                                 Visibility="{Binding RegionVisibility}">
@@ -292,6 +368,14 @@
                                                 Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
                                                 Background="{DynamicResource Card2}" BorderBrush="{DynamicResource Bd3}"
                                                 BorderThickness="1" CornerRadius="11" Padding="9,8" Margin="0,0,0,8">
+                                            <Border.ContextMenu>
+                                                <ContextMenu Style="{StaticResource CardMenu}" Opened="OnCardMenuOpened" Closed="OnCardMenuClosed">
+                                                    <MenuItem Style="{StaticResource CardMenuItem}" Header="编辑备注" Click="OnEditNote" />
+                                                    <MenuItem Style="{StaticResource CardMenuItem}" Header="{Binding PinMenuText}" Click="OnTogglePin" />
+                                                    <Separator Style="{StaticResource CardMenuSeparator}" />
+                                                    <MenuItem Style="{StaticResource CardMenuItemDanger}" Header="从列表移除" Click="OnHideCard" />
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
                                             <DockPanel>
                                                 <Border DockPanel.Dock="Left" Width="38" Height="38" CornerRadius="19" Background="{DynamicResource OffAv}">
                                                     <TextBlock Text="{Binding AvatarText}" Foreground="{DynamicResource OffAvTx}" FontSize="15" FontWeight="SemiBold"
@@ -310,10 +394,28 @@
                                                     <ctrl:IconView x:Name="HideIcon" Geometry="{StaticResource GeoDelete}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="15" />
                                                 </Button>
                                                 <StackPanel Margin="11,0" VerticalAlignment="Center">
-                                                    <TextBlock FontSize="13.5" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource OffTx}">
-                                                        <Run Text="{Binding NameOnly, Mode=OneWay}" /><Run Text="{Binding HashTag, Mode=OneWay}" />
-                                                    </TextBlock>
+                                                    <DockPanel>
+                                                        <ctrl:IconView DockPanel.Dock="Left" Geometry="{StaticResource GeoPin}" Stroke="{DynamicResource Acc}"
+                                                                       Thickness="2.4" IconSize="11" VerticalAlignment="Center" Margin="0,0,4,0"
+                                                                       Visibility="{Binding PinVisibility}" />
+                                                        <TextBlock DockPanel.Dock="Left" FontSize="13.5" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource OffTx}">
+                                                            <Run Text="{Binding NameOnly, Mode=OneWay}" /><Run Text="{Binding HashTag, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Note, Mode=OneWay}" Visibility="{Binding NoteVisibility}"
+                                                                   FontSize="11.5" Foreground="{DynamicResource Tx3}" VerticalAlignment="Center"
+                                                                   Margin="7,1,0,0" TextTrimming="CharacterEllipsis" />
+                                                    </DockPanel>
                                                     <DockPanel Margin="0,2,0,0">
+                                                        <!-- 段位 pill:未保存的号一样有段位,搜索也搜得到 -->
+                                                        <Border DockPanel.Dock="Left" CornerRadius="4" Padding="4,1" Margin="0,0,6,0"
+                                                                VerticalAlignment="Center" Background="{DynamicResource TagBg}"
+                                                                Visibility="{Binding RankVisibility}" ToolTip="{Binding RankTip}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Image Source="{Binding RankIcon}" Width="13" Height="13" Margin="0,0,3,0" VerticalAlignment="Center" />
+                                                                <TextBlock Text="{Binding RankText, Mode=OneWay}" FontSize="10.5"
+                                                                           Foreground="{Binding RankBrush}" VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                        </Border>
                                                         <Border x:Name="RegionPill2" DockPanel.Dock="Left" CornerRadius="4" Padding="5,1" Margin="0,0,6,0"
                                                                 VerticalAlignment="Center" Background="{DynamicResource TagBg}"
                                                                 Visibility="{Binding RegionVisibility}">

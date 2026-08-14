@@ -7,8 +7,10 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using BnetSwitch.Models;
 using BnetSwitch.Services;
+using BnetSwitch.Services.Overwatch;
 using Microsoft.Win32;
 
 namespace BnetSwitch.ViewModels;
@@ -128,6 +130,86 @@ public sealed class AccountRow : ObservableObject
 
     /// <summary>已有快照且不是当前账号,才能一键切换。</summary>
     public bool CanSwitch => HasProfile && !IsActive;
+
+    // ---- 备注 / 置顶 / 段位:都存在 settings.json 与 ranks.json 里,
+    //      ApplyAccounts 每次重建行时重新灌进来(行对象本身是一次性的)。----
+
+    private string _note = "";
+    /// <summary>用户给这个号写的备注。没存快照的号也能写。</summary>
+    public string Note
+    {
+        get => _note;
+        set { Set(ref _note, value ?? ""); Raise(nameof(NoteVisibility)); Raise(nameof(SearchBlob)); }
+    }
+
+    public Visibility NoteVisibility => _note.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    private bool _isPinned;
+    public bool IsPinned
+    {
+        get => _isPinned;
+        set { Set(ref _isPinned, value); Raise(nameof(PinVisibility)); Raise(nameof(PinMenuText)); }
+    }
+
+    public Visibility PinVisibility => _isPinned ? Visibility.Visible : Visibility.Collapsed;
+    public string PinMenuText => _isPinned ? "取消置顶" : "置顶";
+
+    private RankEntry? _rank;
+    /// <summary>缓存下来的段位(只留最高的那个定位)。null = 还没查过 / 未定级。</summary>
+    public RankEntry? Rank
+    {
+        get => _rank;
+        set
+        {
+            Set(ref _rank, value);
+            Raise(nameof(RankText)); Raise(nameof(RankVisibility)); Raise(nameof(RankBrush));
+            Raise(nameof(RankIcon)); Raise(nameof(RankTip)); Raise(nameof(SearchBlob));
+        }
+    }
+
+    public string RankText => _rank?.Text ?? "";
+    public Visibility RankVisibility => _rank is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public Brush? RankBrush =>
+        (_rank?.BrushKey is { } k ? Application.Current?.TryFindResource(k) as Brush : null)
+        ?? Application.Current?.TryFindResource("Tx3") as Brush;
+
+    public ImageSource? RankIcon => LoadIcon(_rank?.IconPath);
+
+    /// <summary>悬停时给出三个定位的全量段位 —— 卡片上只放得下最高的那个。</summary>
+    public string RankTip => _rank is null ? "" : (_rank.AllText.Length > 0 ? _rank.AllText : _rank.Text);
+
+    /// <summary>搜索用的合并文本(名字 / 备注 / 段位 / 区服),已转小写。</summary>
+    public string SearchBlob => $"{BattleTag}\n{_note}\n{RankText}\n{_rank?.AllText}\n{RegionText}".ToLowerInvariant();
+
+    // 行每次轮询都重建,图标不缓存的话会反复读盘解码。冻结后可跨线程共享。
+    private static readonly Dictionary<string, ImageSource?> IconCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static ImageSource? LoadIcon(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        if (IconCache.TryGetValue(path, out var cached)) return cached;
+
+        ImageSource? made = null;
+        try
+        {
+            if (File.Exists(path))
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.DecodePixelWidth = 32;
+                bmp.UriSource = new Uri(path);
+                bmp.EndInit();
+                bmp.Freeze();
+                made = bmp;
+            }
+        }
+        catch { made = null; }
+
+        IconCache[path] = made;
+        return made;
+    }
 }
 
 public sealed class MainViewModel : ObservableObject
@@ -138,6 +220,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly BattleNetController _controller;
     private readonly AppSettings _settings;
     private readonly LicenseService _license;
+    private readonly RankStore _ranks;
+    private readonly TokenStore _tokens = new();
 
     /// <summary>全部账号(主表)。</summary>
     public ObservableCollection<AccountRow> Accounts { get; } = new();
@@ -168,6 +252,20 @@ public sealed class MainViewModel : ObservableObject
 
     private string _statusText = "就绪";
     public string StatusText { get => _statusText; set => Set(ref _statusText, value); }
+
+    private string _rankStatusText = "";
+    /// <summary>
+    /// 「刷新段位」的进度/结果,显示在列表表头右侧。
+    /// 不复用 <see cref="StatusText"/> 是因为它在主界面上根本没有落点(底栏只放了计数和广告位),
+    /// 而刷段位要跑十几秒还会灰掉左边的按钮,不给反馈用户只会以为卡死了。
+    /// </summary>
+    public string RankStatusText
+    {
+        get => _rankStatusText;
+        set { Set(ref _rankStatusText, value); Raise(nameof(RankStatusVisibility)); }
+    }
+
+    public Visibility RankStatusVisibility => _rankStatusText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     private bool _busy;
     public bool Busy { get => _busy; set { Set(ref _busy, value); Raise(nameof(NotBusy)); } }
@@ -361,6 +459,7 @@ public sealed class MainViewModel : ObservableObject
         _profiles = new AppDataStore(_paths);
         _controller = new BattleNetController(_paths);
         _license = new LicenseService();
+        _ranks = RankStore.Load();   // 纯读本地文件,不联网
 
         // 先认本地缓存的授权状态。InitLicenseAsync 排在更新检查和账号刷新后面,
         // 等它跑完状态栏已经晃过一次「去广告」了 —— 付了钱的人不该看到这一下。
@@ -372,7 +471,58 @@ public sealed class MainViewModel : ObservableObject
         Analytics.Init(_settings.ApiBaseUrl, _license.MachineId, AppVersion);
     }
 
-    /// <summary>按「当前号 / 可秒切 / 需保存」重建三个分组 + 计数。</summary>
+    // ---- 搜索(名字 / 备注 / 段位,模糊)----
+
+    private string _searchText = "";
+    private string[] _searchTerms = Array.Empty<string>();
+
+    /// <summary>顶部搜索框。纯内存过滤 —— 只重排现有行,不重读数据库、不联网。</summary>
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (_searchText == (value ?? "")) return;
+            _searchText = value ?? "";
+            _searchTerms = _searchText
+                .Split(new[] { ' ', '　' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.ToLowerInvariant())
+                .ToArray();
+            Raise();
+            Raise(nameof(SearchActive));
+            Raise(nameof(ClearSearchVisibility));
+            RebuildGroups();
+        }
+    }
+
+    public bool SearchActive => _searchTerms.Length > 0;
+    public Visibility ClearSearchVisibility => SearchActive ? Visibility.Visible : Visibility.Collapsed;
+
+    private bool Matches(AccountRow a)
+    {
+        if (_searchTerms.Length == 0) return true;
+        var blob = a.SearchBlob;
+        // 多个关键词是「与」:输入「大号 钻石」时备注和段位要同时命中
+        foreach (var t in _searchTerms)
+            if (!Fuzzy(blob, t)) return false;
+        return true;
+    }
+
+    /// <summary>先直接包含(最常见也最快),不中再按子序列匹配(「zs」命中「Zhang San」、「钻1」命中「钻石1」)。</summary>
+    private static bool Fuzzy(string blob, string term)
+    {
+        if (term.Length == 0) return true;
+        if (blob.Contains(term, StringComparison.Ordinal)) return true;
+
+        int i = 0;
+        foreach (var c in blob)
+        {
+            if (c == term[i] && ++i == term.Length) return true;
+        }
+        return false;
+    }
+
+    /// <summary>按「当前号 / 可秒切 / 需保存」重建三个分组 + 计数。搜索过滤与置顶排序也都收口在这。</summary>
     private void RebuildGroups()
     {
         CurrentAccount = Accounts.FirstOrDefault(a => a.IsActive);
@@ -383,20 +533,31 @@ public sealed class MainViewModel : ObservableObject
 
         var hidden = new HashSet<long>(_settings.HiddenAccountIds);
 
+        var readyAll = Accounts.Where(a => a.HasProfile && !a.IsActive && !hidden.Contains(a.AccountId)).ToList();
+        var unsavedAll = Accounts.Where(a => !a.HasProfile && !hidden.Contains(a.AccountId)).ToList();
+
         ReadyAccounts.Clear();
-        foreach (var a in Accounts.Where(a => a.HasProfile && !a.IsActive && !hidden.Contains(a.AccountId))
-                                  .OrderByDescending(a => a.SavedAtUtc ?? DateTime.MinValue))
+        foreach (var a in readyAll.Where(Matches)
+                                  .OrderByDescending(a => a.IsPinned)
+                                  .ThenByDescending(a => a.SavedAtUtc ?? DateTime.MinValue))
             ReadyAccounts.Add(a);
 
         UnsavedAccounts.Clear();
-        foreach (var a in Accounts.Where(a => !a.HasProfile && !hidden.Contains(a.AccountId))
-                                  .OrderBy(a => a.BattleTag, StringComparer.CurrentCulture))
+        foreach (var a in unsavedAll.Where(Matches)
+                                    .OrderByDescending(a => a.IsPinned)
+                                    .ThenBy(a => a.BattleTag, StringComparer.CurrentCulture))
             UnsavedAccounts.Add(a);
 
         var total = Accounts.Count(a => !hidden.Contains(a.AccountId));
         var saved = Accounts.Count(a => a.HasProfile && !hidden.Contains(a.AccountId));
-        ReadyCountText = $"{ReadyAccounts.Count} 个已存快照";
-        UnsavedCountText = $"需先保存快照 · {UnsavedAccounts.Count}";
+
+        // 过滤态下要把「筛出几个 / 共几个」都写出来,不然用户会以为号丢了
+        ReadyCountText = SearchActive
+            ? $"{ReadyAccounts.Count} / {readyAll.Count} 个已存快照"
+            : $"{ReadyAccounts.Count} 个已存快照";
+        UnsavedCountText = SearchActive
+            ? $"需先保存快照 · {UnsavedAccounts.Count} / {unsavedAll.Count}"
+            : $"需先保存快照 · {UnsavedAccounts.Count}";
         TotalCountText = $"共 {total} 个 · 已保存 {saved} 个";
         Raise(nameof(UnsavedVisibility));
     }
@@ -411,6 +572,95 @@ public sealed class MainViewModel : ObservableObject
         _settings.Save();
         RebuildGroups();
         StatusText = $"已从列表移除「{row.BattleTag}」。它仍在战网里,重新登录该号会再次出现。";
+    }
+
+    // ---- 备注 / 置顶 ----
+
+    /// <summary>写备注。传空串 = 删掉备注。存 settings.json,和快照无关,没存快照的号也能写。</summary>
+    public void SetNote(AccountRow row, string? note)
+    {
+        var key = row.AccountId.ToString();
+        var text = (note ?? "").Trim();
+        if (text.Length == 0) _settings.AccountNotes.Remove(key);
+        else _settings.AccountNotes[key] = text;
+        _settings.Save();
+
+        row.Note = text;
+        RebuildGroups();
+        StatusText = text.Length == 0 ? $"已清除「{row.BattleTag}」的备注" : $"已保存备注:{text}";
+    }
+
+    /// <summary>置顶 / 取消置顶。只影响本工具里的排序。</summary>
+    public void TogglePin(AccountRow row)
+    {
+        if (!_settings.PinnedAccountIds.Remove(row.AccountId))
+            _settings.PinnedAccountIds.Add(row.AccountId);
+        _settings.Save();
+
+        row.IsPinned = _settings.PinnedAccountIds.Contains(row.AccountId);
+        RebuildGroups();
+        StatusText = row.IsPinned ? $"已置顶「{row.BattleTag}」" : $"已取消置顶「{row.BattleTag}」";
+    }
+
+    // ---- 段位 ----
+
+    /// <summary>拿网易大神会话(国服查段位要);由界面层注入,VM 不自己 new Window。</summary>
+    public Func<Task<DashenClient?>>? CnAuthProvider { get; set; }
+
+    /// <summary>
+    /// 点「刷新段位」才会走到这:按区服分别查一遍,结果写进 ranks.json。
+    /// 启动、轮询、切号都不碰这里 —— 段位一律走本地缓存。
+    /// </summary>
+    public async Task RefreshRanksAsync()
+    {
+        if (Busy) return;
+        var hidden = new HashSet<long>(_settings.HiddenAccountIds);
+        var targets = Accounts
+            .Where(a => !hidden.Contains(a.AccountId) && a.BattleTag.Contains('#'))
+            .Select(a => new RankFetcher.Target(a.AccountId, a.BattleTag, a.IsCnRegion))
+            .ToList();
+
+        if (targets.Count == 0) { StatusText = RankStatusText = "没有可查段位的账号。"; AutoClearRankStatus(); return; }
+
+        Busy = true;
+        try
+        {
+            // 进度回调是从 RankFetcher 内部的 await 之后打出来的,那儿不一定还在 UI 线程,
+            // 而 RankStatusText 已经绑到界面上了 —— 必须自己切回 Dispatcher 再赋值。
+            var disp = Application.Current?.Dispatcher;
+            void Log(string msg)
+            {
+                if (disp is null || disp.CheckAccess()) { StatusText = msg; RankStatusText = msg; }
+                else disp.Invoke(() => { StatusText = msg; RankStatusText = msg; });
+            }
+
+            var fetcher = new RankFetcher { CnAuthProvider = CnAuthProvider };
+            var r = await fetcher.RefreshAsync(targets, _ranks, Log);
+
+            foreach (var a in Accounts) a.Rank = _ranks.Get(a.AccountId);
+            RebuildGroups();
+
+            var parts = new List<string> { $"已更新 {r.Updated} 个号的段位" };
+            if (r.NoRank > 0) parts.Add($"{r.NoRank} 个未定级");
+            if (r.CnSkipped > 0) parts.Add($"{r.CnSkipped} 个国服号未授权跳过");
+            if (r.Failed > 0) parts.Add($"{r.Failed} 个查询失败");
+            StatusText = RankStatusText = string.Join(" · ", parts);
+        }
+        catch (Exception ex)
+        {
+            StatusText = RankStatusText = "刷新段位失败:" + ex.Message;
+        }
+        finally { Busy = false; AutoClearRankStatus(); }
+    }
+
+    private int _rankStatusSeq;
+
+    /// <summary>结果提示看几秒就够了,别让它一直挂在表头上。后来的提示会作废前一个的定时清除。</summary>
+    private async void AutoClearRankStatus()
+    {
+        var seq = ++_rankStatusSeq;
+        await Task.Delay(8000);
+        if (seq == _rankStatusSeq && !Busy) RankStatusText = "";
     }
 
     // ---- 自动检测「战网里登了新号 / 换了号」(避免必须手点刷新或重启本工具)----
@@ -455,7 +705,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!seen.Add(a.AccountId)) continue;
             var meta = _profiles.ReadMeta(a.AccountId);
-            Accounts.Add(new AccountRow
+            var row = new AccountRow
             {
                 AccountId = a.AccountId,
                 Environment = envs.TryGetValue(a.AccountId, out var env) ? env : a.Environment,
@@ -464,7 +714,9 @@ public sealed class MainViewModel : ObservableObject
                 HasProfile = meta != null,
                 SavedAtUtc = meta?.SavedAtUtc,
                 IsExpired = meta?.Expired == true,
-            });
+            };
+            HydrateRow(row);
+            Accounts.Add(row);
         }
 
         // 指针已经指向新号,但战网还没把这一行写进 login_cache(刚登录/换区时有这个空档)。
@@ -472,7 +724,7 @@ public sealed class MainViewModel : ObservableObject
         if (activeId is long id && !seen.Contains(id))
         {
             var meta = _profiles.ReadMeta(id);
-            Accounts.Add(new AccountRow
+            var row = new AccountRow
             {
                 AccountId = id,
                 BattleTag = string.IsNullOrWhiteSpace(meta?.BattleTag) ? id.ToString() : meta!.BattleTag,
@@ -480,12 +732,22 @@ public sealed class MainViewModel : ObservableObject
                 HasProfile = meta != null,
                 SavedAtUtc = meta?.SavedAtUtc,
                 IsExpired = meta?.Expired == true,
-            });
+            };
+            HydrateRow(row);
+            Accounts.Add(row);
         }
 
         _lastActiveId = activeId;
         _lastIdSet = string.Join(",", Accounts.Select(r => r.AccountId).OrderBy(x => x));
         RebuildGroups();
+    }
+
+    /// <summary>行是每轮询重建一次的一次性对象,备注/置顶/段位得从各自的 store 里重新灌回去。</summary>
+    private void HydrateRow(AccountRow row)
+    {
+        row.Note = _settings.AccountNotes.TryGetValue(row.AccountId.ToString(), out var n) ? n : "";
+        row.IsPinned = _settings.PinnedAccountIds.Contains(row.AccountId);
+        row.Rank = _ranks.Get(row.AccountId);
     }
 
     /// <summary>
@@ -681,7 +943,11 @@ public sealed class MainViewModel : ObservableObject
             var (list, activeId) = await ReadAllAsync();
             ApplyAccounts(list, activeId);
 
-            var active = activeId is null ? null : Accounts.FirstOrDefault(a => a.AccountId == activeId.Value);
+            // 存进哪个号,以 live config(FNV+区服)为准,不信 CachedData 指针 ——
+            // 同邮箱 KR/CN 时指针会指错,一点保存就把当前状态存进【另一个区】的号(KR 号的快照被存成 CN 就是这么来的)。
+            // 判不出唯一账号(null)才退回指针。
+            var trueId = await Task.Run(() => _reader.ResolveCurrentAccountFromConfig()) ?? activeId;
+            var active = trueId is null ? null : Accounts.FirstOrDefault(a => a.AccountId == trueId.Value);
             if (active is null)
             {
                 MessageBox.Show(
@@ -697,6 +963,10 @@ public sealed class MainViewModel : ObservableObject
 
             StatusText = $"正在保存「{active.BattleTag}」的登录快照…";
             await Task.Run(() => _profiles.Save(active.AccountId, active.BattleTag));
+            // 顺带把该号在 CachedData.db 的活跃指针(account_id/region)也存下,切换时写回,避免同邮箱 KR/CN 残留旧区域
+            _profiles.SavePointer(active.AccountId, await Task.Run(() => _reader.ReadActivePointerJson()));
+            // 令牌本体也存一份:同邮箱的两个区服共用一个槽,不存下来就没法切回去(见 TokenStore)
+            _profiles.SaveTokens(active.AccountId, await Task.Run(() => _tokens.ReadAll()));
             active.HasProfile = true;
             active.SavedAtUtc = DateTime.UtcNow;
             active.IsExpired = false;   // 刚存的快照配的是刚登进去的令牌,过期标记作废
@@ -717,6 +987,47 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// 目标号和刚才那个号是【同一个登录名(邮箱)】时,把目标号存下的令牌写回注册表。
+    ///
+    /// 背景:同邮箱在两个区服注册的两个账号共用同一个 UnifiedAuth 槽,谁后登录槽里就是谁的令牌。
+    /// 只换文件和区域指针救不了 —— 客户端会拿着【错区服的令牌】去敲服务器,被拒后报「无法登录战网」。
+    /// 2026-08-14 实测:把旧值写回去就能免密登回去(见 <see cref="TokenStore"/>)。
+    ///
+    /// 判定条件故意收得很紧(登录名相同才动),不同邮箱的号一律不碰注册表 —— 那条路本来就是好的,不该有任何回归。
+    /// 调用时机必须是【优雅退出之后、LaunchClient 之前】。
+    /// </summary>
+    private void RestoreTokenIfSameLogin(long targetId, long? fromId)
+    {
+        try
+        {
+            // 1) 只有同邮箱才可能抢同一个槽。不同邮箱一律不碰注册表。
+            var targetLogin = _profiles.ReadLoginName(targetId);
+            if (targetLogin is null || fromId is not long from) return;
+            if (!string.Equals(targetLogin, _loginNameBeforeSwitch, StringComparison.OrdinalIgnoreCase)) return;
+
+            var saved = _profiles.ReadTokens(targetId);
+            var fromSaved = _profiles.ReadTokens(from);
+            if (saved.Count == 0 || fromSaved.Count == 0) return;   // 两边都存过才敢动,存不全就宁可不写
+
+            // 2) 关键的收窄:只写【这两个号之间真正有争议的槽】——
+            //    也就是目标号那份快照和来源号那份快照【不一样】的槽,正好就是它俩共用的那个。
+            //    绝不能只按「和当前注册表不一样」来写:那样会把快照里【别的号的旧令牌】也一起写回去,
+            //    把那个号(比如中途登过的第三个号)的有效令牌覆盖成过期的,反而制造新故障。
+            var contested = TokenStore.SlotsToRestore(saved, fromSaved);
+            if (contested.Count == 0) return;
+
+            var current = _tokens.ReadAll();
+            foreach (var slot in contested)
+                if (!current.TryGetValue(slot, out var now) || !now.AsSpan().SequenceEqual(saved[slot]))
+                    _tokens.Write(slot, saved[slot]);
+        }
+        catch { /* 令牌写回是增强,失败不该让整个切换失败 */ }
+    }
+
+    /// <summary>切换开始时(还没还原文件)记下的当前登录名,用来判断目标号是不是同邮箱。</summary>
+    private string? _loginNameBeforeSwitch;
+
     /// <summary>切换到目标账号:关战网 → 更新当前号快照 → 还原目标 → 重启。点卡片直接切,不再二次确认。</summary>
     public async Task SwitchToAsync(AccountRow target)
     {
@@ -734,18 +1045,28 @@ public sealed class MainViewModel : ObservableObject
         Busy = true;
         try
         {
+            // 先记下当前登录名(等会 Restore 会把 live 配置覆盖掉,那时就读不到了)——
+            // 用来判断目标号是不是和它同邮箱,只有同邮箱才需要写回令牌。
+            _loginNameBeforeSwitch = _profiles.ReadLiveLoginName();
+
             StatusText = "正在关闭战网…";
             var stopped = await Task.Run(() => _controller.GracefulQuit());
             if (!stopped)
                 throw new InvalidOperationException("战网未能完全退出,已中止切换。请从托盘右键『退出』战网后重试。");
 
-            if (currentId is long cur && cur != target.AccountId)
+            // 存进哪个号的快照,以 live config(FNV+区服)为准,不再信 CachedData 指针 ——
+            // 指针在 %LOCALAPPDATA%、还原换不到,脱钩时会把当前状态灌进错误号的快照(切换后掉登录页)。
+            // 判定不出唯一账号(null)就跳过这次保存:宁可不更新,也不污染。
+            var saveInto = await Task.Run(() => _reader.ResolveCurrentAccountFromConfig());
+            if (saveInto is long cur && cur != target.AccountId)
             {
                 var curRow = Accounts.FirstOrDefault(a => a.AccountId == cur);
                 if (curRow is { HasProfile: true })
                 {
                     StatusText = $"正在更新当前号「{curRow.BattleTag}」的快照…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
+                    _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
+                    _profiles.SaveTokens(cur, await Task.Run(() => _tokens.ReadAll()));
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;   // 它刚才还登着,令牌显然是好的
                 }
@@ -753,6 +1074,16 @@ public sealed class MainViewModel : ObservableObject
 
             StatusText = $"正在还原「{target.BattleTag}」的账号文件…";
             await Task.Run(() => _profiles.Restore(target.AccountId));
+            // 关键:把目标号的活跃指针写回 CachedData.db(%LOCALAPPDATA%,Restore 不覆盖这块)——
+            // 否则同邮箱 KR/CN 互切时,残留的旧区域指针会和还原的配置打架,导致「无法登录战网」连接错。
+            var targetPtr = _profiles.ReadPointer(target.AccountId);
+            if (targetPtr is not null)
+                await Task.Run(() => _reader.WriteActivePointer(targetPtr));
+
+            // 同邮箱的两个区服账号(一个 CN、一个 KR)【共用一个 UnifiedAuth 令牌槽】,后登的会把先登的覆盖掉。
+            // 只有这种情况才需要把令牌写回 —— 不同邮箱各有各的槽,本来就并存,一个字节都不动。
+            // 必须卡在【客户端已退出、还没启动】这个空档:让客户端拿着错令牌启动,它会自己把槽删掉。
+            await Task.Run(() => RestoreTokenIfSameLogin(target.AccountId, saveInto));
 
             StatusText = "正在启动战网…";
             await Task.Run(() => _controller.LaunchClient());
@@ -790,19 +1121,22 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             StatusText = "正在关闭战网…";
-            var currentId = await Task.Run(() => _reader.ReadActiveAccountId());
             var stopped = await Task.Run(() => _controller.GracefulQuit());
             if (!stopped)
                 throw new InvalidOperationException("战网未能完全退出,请从托盘右键『退出』战网后重试。");
 
-            // 顺手把当前号存一遍:等下要清指针回登录页,现在不存,它的快照就停在上一次保存的状态
-            if (currentId is long cur && cur != row.AccountId)
+            // 顺手把当前号存一遍:等下要清指针回登录页,现在不存,它的快照就停在上一次保存的状态。
+            // 存进哪个号以 live config(FNV+区服)为准,不信 CachedData 指针 —— 脱钩会污染错误号的快照。
+            var saveInto = await Task.Run(() => _reader.ResolveCurrentAccountFromConfig());
+            if (saveInto is long cur && cur != row.AccountId)
             {
                 var curRow = Accounts.FirstOrDefault(a => a.AccountId == cur);
                 if (curRow is { HasProfile: true })
                 {
                     StatusText = $"正在保存当前号「{curRow.BattleTag}」…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
+                    _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
+                    _profiles.SaveTokens(cur, await Task.Run(() => _tokens.ReadAll()));
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;
                 }

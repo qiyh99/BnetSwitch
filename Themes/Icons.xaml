@@ -48,6 +48,12 @@
     <StreamGeometry x:Key="GeoChart">M-9,9 V-1 M0,9 V-9 M9,9 V4</StreamGeometry>
     <!-- 电源符号:竖线 + 缺口朝上的 270° 圆弧 -->
     <StreamGeometry x:Key="GeoPower">M0,-11 V-1 M-6.4,-6.4 A9,9 0 1 0 6.4,-6.4</StreamGeometry>
+    <!-- 放大镜:圆 + 右下手柄 -->
+    <StreamGeometry x:Key="GeoSearch">M-9,-3 A6.5,6.5 0 1 1 4,-3 A6.5,6.5 0 1 1 -9,-3 Z M2.6,1.6 L9,8</StreamGeometry>
+    <!-- 图钉:顶横杠 + 钉身 + 针尖(置顶标记)-->
+    <StreamGeometry x:Key="GeoPin">M-6,-10 H6 M-3.5,-10 V-2 L-8,3 H8 L3.5,-2 V-10 M0,3 V11</StreamGeometry>
+    <!-- 便签:纸 + 两行字(备注)-->
+    <StreamGeometry x:Key="GeoNote">M-10,-11 H10 V11 H-10 Z M-5.5,-4.5 H5.5 M-5.5,2 H2</StreamGeometry>
 
     <!-- Logo(六边形,外描边 + 内填充)-->
     <StreamGeometry x:Key="GeoLogoOuter">M0,-14 L12.1,-7 L12.1,7 L0,14 L-12.1,7 L-12.1,-7 Z</StreamGeometry>
