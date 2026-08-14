@@ -1063,41 +1063,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// 目标号和刚才那个号是【同一个登录名(邮箱)】时,把目标号存下的令牌写回注册表。
-    ///
-    /// 背景:同邮箱在两个区服注册的两个账号共用同一个 UnifiedAuth 槽,谁后登录槽里就是谁的令牌。
-    /// 只换文件和区域指针救不了 —— 客户端会拿着【错区服的令牌】去敲服务器,被拒后报「无法登录战网」。
-    /// 2026-08-14 实测:把旧值写回去就能免密登回去(见 <see cref="TokenStore"/>)。
-    ///
-    /// 判定条件故意收得很紧(登录名相同才动),不同邮箱的号一律不碰注册表 —— 那条路本来就是好的,不该有任何回归。
-    /// 调用时机必须是【优雅退出之后、LaunchClient 之前】。
-    /// </summary>
-    private void RestoreTokenIfSameLogin(long targetId, long? fromId)
-    {
-        try
-        {
-            // 1) 只有同邮箱才可能抢同一个槽。不同邮箱各有各的槽、本来就并存,一律不碰注册表。
-            var targetLogin = _profiles.ReadLoginName(targetId);
-            if (targetLogin is null || fromId is null) return;
-            if (!string.Equals(targetLogin, _loginNameBeforeSwitch, StringComparison.OrdinalIgnoreCase)) return;
 
-            // 2) 只写【这个号自己的那一个槽】。槽名是登录后「哪个槽变了」学出来的,学不出来就不动。
-            //    早先用「两个号的快照互相 diff 取有争议的槽」——那是错的:第三个号中途登录过的话,
-            //    它的槽在两份快照里也不一样,会被一并写回旧值,把它的有效令牌覆盖成过期的。
-            var slot = _profiles.ReadOwnSlot(targetId);
-            if (slot is null) return;
-
-            var saved = _profiles.ReadTokens(targetId);
-            if (!saved.TryGetValue(slot, out var want)) return;   // 没存到它的令牌(存快照时槽正好是空的)
-
-            var current = _tokens.ReadAll();
-            if (current.TryGetValue(slot, out var now) && now.AsSpan().SequenceEqual(want)) return;  // 已经是它
-
-            _tokens.Write(slot, want);
-        }
-        catch { /* 令牌写回是增强,失败不该让整个切换失败 */ }
-    }
 
     /// <summary>
     /// 存快照时把令牌一起记下,并顺便学出「这个号自己的槽是哪个」:
@@ -1257,7 +1223,11 @@ public sealed class MainViewModel : ObservableObject
             // 同邮箱的两个区服账号(一个 CN、一个 KR)【共用一个 UnifiedAuth 令牌槽】,后登的会把先登的覆盖掉。
             // 只有这种情况才需要把令牌写回 —— 不同邮箱各有各的槽,本来就并存,一个字节都不动。
             // 必须卡在【客户端已退出、还没启动】这个空档:让客户端拿着错令牌启动,它会自己把槽删掉。
-            await Task.Run(() => RestoreTokenIfSameLogin(target.AccountId, saveInto));
+            // 【不要往注册表写令牌】2026-08-14 实测教训:暴雪的免密令牌是【一次性轮换】的,
+            // 每次成功登录都会发新的、作废旧的。快照里存的那份只要该号之后又登录过就已经是死令牌,
+            // 写回去 → 服务器拒绝(日志 Tassadar token rejected by BGS)→ 客户端把整个槽删掉,
+            // 于是【死令牌没用上,原本槽里的活令牌也一起赔进去】。
+            // 令牌仍然会随快照存下来(排障有用),但绝不写回。
 
             // 跨区服切换时把游戏文件也换过去,省掉每次一百多兆的重新下载。
             var gameNote = await RestoreGameStateIfCrossRegionAsync(target);

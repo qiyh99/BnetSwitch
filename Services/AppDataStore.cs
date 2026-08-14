@@ -72,6 +72,38 @@ public sealed class AppDataStore
             JsonSerializer.Serialize(dto, new JsonSerializerOptions { WriteIndented = true }));
     }
 
+    /// <summary>
+    /// 在所有账号的令牌快照里,找某个槽【最新的那份值】。
+    ///
+    /// 为什么不直接用目标号自己那份:每次切号都会把当时的整份 UnifiedAuth 存进当前号的快照,
+    /// 所以同一个槽在不同号的快照里都有,而【最后存的那份才是最新的】。
+    /// 目标号自己的快照可能存于很久以前,里面是已经被刷新掉的旧令牌,写回去照样登不上。
+    /// </summary>
+    public byte[]? FindNewestToken(string slot)
+    {
+        byte[]? best = null;
+        var bestTime = DateTime.MinValue;
+        if (!Directory.Exists(Root)) return null;
+        foreach (var dir in Directory.EnumerateDirectories(Root))
+        {
+            var f = Path.Combine(dir, "uauth.json");
+            if (!File.Exists(f)) continue;
+            var t = File.GetLastWriteTimeUtc(f);
+            if (t <= bestTime) continue;
+            try
+            {
+                var dto = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(f));
+                if (dto is not null && dto.TryGetValue(slot, out var b64))
+                {
+                    best = Convert.FromBase64String(b64);
+                    bestTime = t;
+                }
+            }
+            catch { }
+        }
+        return best;
+    }
+
     /// <summary>读该账号存下的令牌槽;没有就是空字典。</summary>
     public Dictionary<string, byte[]> ReadTokens(long id)
     {
