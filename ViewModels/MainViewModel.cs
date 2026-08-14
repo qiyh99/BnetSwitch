@@ -320,8 +320,14 @@ public sealed class MainViewModel : ObservableObject
     public Visibility RankStatusVisibility => _rankStatusText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     private bool _busy;
-    public bool Busy { get => _busy; set { Set(ref _busy, value); Raise(nameof(NotBusy)); } }
+    public bool Busy { get => _busy; set { Set(ref _busy, value); Raise(nameof(NotBusy)); Raise(nameof(BusyVisibility)); } }
     public bool NotBusy => !_busy;
+
+    /// <summary>
+    /// 忙碌遮罩。跨区服切号要等战网后台进程退出(十几秒),没有反馈的话看着就像卡死了;
+    /// 遮罩里直接显示 <see cref="StatusText"/>,当前在做哪一步一目了然。
+    /// </summary>
+    public Visibility BusyVisibility => _busy ? Visibility.Visible : Visibility.Collapsed;
 
     private bool _clientRunning;
     /// <summary>战网客户端(不含 Agent)是否在跑。轮询刷新,身份卡上那个按钮的文案跟着它变。</summary>
@@ -1144,8 +1150,8 @@ public sealed class MainViewModel : ObservableObject
             // Agent 内存里存着 product.db,活着时读到的可能是半写状态、写进去又会被它覆盖回来。
             // 所以【存和还原都放在它退干净之后】。只有跨区服才等,普通切号不受影响。
             StatusText = "正在等待战网后台进程退出…";
-            // 先给它几秒自己退(最省事也最干净);超时了才看用户有没有允许强制结束。
-            var stopped = await Task.Run(() => BattleNetController.WaitUntilAgentStopped(attempts: 12));
+            // 先给它 2 秒自己退(最省事也最干净);超时了才看用户有没有允许强制结束。
+            var stopped = await Task.Run(() => BattleNetController.WaitUntilAgentStopped(attempts: 8));
             if (!stopped && _settings.ForceKillAgentOnSwitch)
             {
                 StatusText = "正在结束战网后台进程(Agent)…";

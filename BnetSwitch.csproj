@@ -12,7 +12,7 @@
     <RootNamespace>BnetSwitch</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>2.1.0</Version>
+    <Version>2.1.1</Version>
     <Authors>BnetSwitch</Authors>
     <Product>战网账号切换管理器</Product>
   </PropertyGroup>

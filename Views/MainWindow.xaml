@@ -500,5 +500,50 @@
         <!-- 模态弹窗时盖一层半透明遮罩(dim),对齐原型 .ov 的 mask -->
         <Border x:Name="DimOverlay" Grid.Row="0" Grid.RowSpan="3" Background="{DynamicResource Mask}"
                 Visibility="Collapsed" />
+
+        <!-- 忙碌遮罩:切号/保存期间盖住整窗,显示当前进行到哪一步。
+             跨区服切号要等战网后台进程退出(十几秒),没有反馈会被当成卡死。 -->
+        <Border Grid.Row="0" Grid.RowSpan="3" Background="{DynamicResource Mask}"
+                Visibility="{Binding BusyVisibility}">
+            <Border Background="{DynamicResource Card}" BorderBrush="{DynamicResource Bd3}" BorderThickness="1"
+                    CornerRadius="14" Padding="26,22" MaxWidth="420"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <ctrl:IconView Geometry="{StaticResource GeoRefresh}"
+                                   Stroke="{DynamicResource Acc}" Thickness="2.4" IconSize="30"
+                                   HorizontalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                        <ctrl:IconView.RenderTransform>
+                            <RotateTransform />
+                        </ctrl:IconView.RenderTransform>
+                        <ctrl:IconView.Style>
+                            <!-- 转圈只由自己驱动:Style 里不能用 TargetName 指别的元素 -->
+                            <Style TargetType="{x:Type ctrl:IconView}" BasedOn="{StaticResource {x:Type ctrl:IconView}}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Busy}" Value="True">
+                                        <DataTrigger.EnterActions>
+                                            <BeginStoryboard x:Name="SpinStory">
+                                                <Storyboard>
+                                                    <DoubleAnimation
+                                                        Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                                        From="0" To="360" Duration="0:0:1.1" RepeatBehavior="Forever" />
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </DataTrigger.EnterActions>
+                                        <DataTrigger.ExitActions>
+                                            <StopStoryboard BeginStoryboardName="SpinStory" />
+                                        </DataTrigger.ExitActions>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ctrl:IconView.Style>
+                    </ctrl:IconView>
+                    <TextBlock Text="{Binding StatusText}" Margin="0,16,0,0" FontSize="13"
+                               Foreground="{DynamicResource Tx1}" TextWrapping="Wrap"
+                               HorizontalAlignment="Center" TextAlignment="Center" />
+                    <TextBlock Text="请勿手动开关战网" Margin="0,8,0,0" FontSize="11.5"
+                               Foreground="{DynamicResource Tx3}" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </Window>

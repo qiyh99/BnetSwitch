@@ -67,9 +67,10 @@ public sealed class AppSettings
     /// 而它比客户端慢一拍才退,实测平均要等 15 秒,这是跨区服切号唯一的耗时来源
     /// (换文件本身是 0.0 秒)。结束它的风险很低:Agent 只管下载/安装,不持有任何登录状态
     /// (令牌在注册表、登录态在 %APPDATA%),战网启动时会自己把它拉起来。
-    /// 默认关 —— 动别人的进程这件事,交给用户自己决定。
+    /// 默认开:等十几秒的体验太差,而代价只是结束一个会自动重启的下载代理进程。
+    /// 关掉就退回「老老实实等它自己退」。
     /// </summary>
-    public bool ForceKillAgentOnSwitch { get; set; } = false;
+    public bool ForceKillAgentOnSwitch { get; set; } = true;
 
     /// <summary>深色模式。</summary>
     public bool DarkMode { get; set; } = false;
