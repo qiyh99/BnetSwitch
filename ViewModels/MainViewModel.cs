@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Net.Http;
@@ -139,7 +139,7 @@ public sealed class AccountRow : ObservableObject
     public string Note
     {
         get => _note;
-        set { Set(ref _note, value ?? ""); Raise(nameof(NoteVisibility)); Raise(nameof(SearchBlob)); }
+        set { Set(ref _note, value ?? ""); Raise(nameof(NoteVisibility)); Raise(nameof(SearchFields)); }
     }
 
     public Visibility NoteVisibility => _note.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -163,7 +163,46 @@ public sealed class AccountRow : ObservableObject
         {
             Set(ref _rank, value);
             Raise(nameof(RankText)); Raise(nameof(RankVisibility)); Raise(nameof(RankBrush));
-            Raise(nameof(RankIcon)); Raise(nameof(RankTip)); Raise(nameof(SearchBlob));
+            Raise(nameof(RankIcon)); Raise(nameof(RankTip)); Raise(nameof(SearchFields));
+            Raise(nameof(RankRoles));
+        }
+    }
+
+    /// <summary>卡片上一个定位一个 pill 的展示对象。</summary>
+    public sealed class RankRoleVM
+    {
+        public string RoleCn { get; init; } = "";
+        public string Text { get; init; } = "";
+        public Brush? Brush { get; init; }
+        public ImageSource? Icon { get; init; }
+    }
+
+    /// <summary>
+    /// 全部定位,卡片上挨个展开。
+    /// 老版本 ranks.json 里没有 Roles 字段 —— 兜底用顶部那份合成一条,免得升级后卡片上段位整片消失。
+    /// </summary>
+    public RankRoleVM[] RankRoles
+    {
+        get
+        {
+            if (_rank is null) return [];
+
+            var src = _rank.Roles;
+            if (src.Count == 0 && _rank.Text.Length > 0)
+                src = [new RankRole
+                {
+                    RoleCn = _rank.Role, Text = _rank.Text,
+                    BrushKey = _rank.BrushKey, IconPath = _rank.IconPath,
+                }];
+
+            return src.Select(r => new RankRoleVM
+            {
+                RoleCn = r.RoleCn,
+                Text = r.Text,
+                Brush = (r.BrushKey is { } k ? Application.Current?.TryFindResource(k) as Brush : null)
+                        ?? Application.Current?.TryFindResource("Tx3") as Brush,
+                Icon = LoadIcon(r.IconPath),
+            }).ToArray();
         }
     }
 
@@ -179,8 +218,20 @@ public sealed class AccountRow : ObservableObject
     /// <summary>悬停时给出三个定位的全量段位 —— 卡片上只放得下最高的那个。</summary>
     public string RankTip => _rank is null ? "" : (_rank.AllText.Length > 0 ? _rank.AllText : _rank.Text);
 
-    /// <summary>搜索用的合并文本(名字 / 备注 / 段位 / 区服),已转小写。</summary>
-    public string SearchBlob => $"{BattleTag}\n{_note}\n{RankText}\n{_rank?.AllText}\n{RegionText}".ToLowerInvariant();
+    /// <summary>
+    /// 搜索用的各个字段(名字 / 备注 / 段位 / 区服 / 账号 id),已转小写。
+    /// 【必须分字段,不能拼成一整段】:子序列匹配跨字段能乱拼 —— 拼成一段的话,
+    /// 关键词「111」会把名字里的 1 和段位「黄金1」里的 1 凑够三个,匹配出一堆无关的号。
+    /// </summary>
+    public string[] SearchFields =>
+    [
+        BattleTag.ToLowerInvariant(),
+        _note.ToLowerInvariant(),
+        RankText.ToLowerInvariant(),
+        (_rank?.AllText ?? "").ToLowerInvariant(),
+        RegionText.ToLowerInvariant(),
+        AccountIdText,      // 纯数字,只会走精确包含(见 Fuzzy),不会乱命中
+    ];
 
     // 行每次轮询都重建,图标不缓存的话会反复读盘解码。冻结后可跨线程共享。
     private static readonly Dictionary<string, ImageSource?> IconCache = new(StringComparer.OrdinalIgnoreCase);
@@ -222,6 +273,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly LicenseService _license;
     private readonly RankStore _ranks;
     private readonly TokenStore _tokens = new();
+    private readonly GameStateStore _gameState = new();
 
     /// <summary>全部账号(主表)。</summary>
     public ObservableCollection<AccountRow> Accounts { get; } = new();
@@ -501,25 +553,43 @@ public sealed class MainViewModel : ObservableObject
     private bool Matches(AccountRow a)
     {
         if (_searchTerms.Length == 0) return true;
-        var blob = a.SearchBlob;
-        // 多个关键词是「与」:输入「大号 钻石」时备注和段位要同时命中
+        var fields = a.SearchFields;
+        // 多个关键词是「与」:输入「大号 钻石」时备注和段位要同时命中。
+        // 但单个关键词只需要在【某一个字段内】命中 —— 不允许跨字段拼凑。
         foreach (var t in _searchTerms)
-            if (!Fuzzy(blob, t)) return false;
+        {
+            var hit = false;
+            foreach (var f in fields)
+                if (Fuzzy(f, t)) { hit = true; break; }
+            if (!hit) return false;
+        }
         return true;
     }
 
-    /// <summary>先直接包含(最常见也最快),不中再按子序列匹配(「zs」命中「Zhang San」、「钻1」命中「钻石1」)。</summary>
-    private static bool Fuzzy(string blob, string term)
+    /// <summary>
+    /// 先直接包含(最常见也最快),不中再按子序列匹配(「zs」命中「Zhang San」、「钻1」命中「钻石1」)。
+    /// 【纯数字的关键词不做子序列】:输数字的人要找的就是那串数字,
+    /// 放开子序列的话「111」会命中任何散着三个 1 的文本,全是噪音。
+    /// </summary>
+    private static bool Fuzzy(string field, string term)
     {
         if (term.Length == 0) return true;
-        if (blob.Contains(term, StringComparison.Ordinal)) return true;
+        if (field.Contains(term, StringComparison.Ordinal)) return true;
+        if (IsAllDigits(term)) return false;
 
         int i = 0;
-        foreach (var c in blob)
+        foreach (var c in field)
         {
             if (c == term[i] && ++i == term.Length) return true;
         }
         return false;
+    }
+
+    private static bool IsAllDigits(string s)
+    {
+        foreach (var c in s)
+            if (c is < '0' or > '9') return false;
+        return true;
     }
 
     /// <summary>按「当前号 / 可秒切 / 需保存」重建三个分组 + 计数。搜索过滤与置顶排序也都收口在这。</summary>
@@ -966,7 +1036,7 @@ public sealed class MainViewModel : ObservableObject
             // 顺带把该号在 CachedData.db 的活跃指针(account_id/region)也存下,切换时写回,避免同邮箱 KR/CN 残留旧区域
             _profiles.SavePointer(active.AccountId, await Task.Run(() => _reader.ReadActivePointerJson()));
             // 令牌本体也存一份:同邮箱的两个区服共用一个槽,不存下来就没法切回去(见 TokenStore)
-            _profiles.SaveTokens(active.AccountId, await Task.Run(() => _tokens.ReadAll()));
+            await Task.Run(() => CaptureTokens(active.AccountId));
             active.HasProfile = true;
             active.SavedAtUtc = DateTime.UtcNow;
             active.IsExpired = false;   // 刚存的快照配的是刚登进去的令牌,过期标记作废
@@ -1001,32 +1071,130 @@ public sealed class MainViewModel : ObservableObject
     {
         try
         {
-            // 1) 只有同邮箱才可能抢同一个槽。不同邮箱一律不碰注册表。
+            // 1) 只有同邮箱才可能抢同一个槽。不同邮箱各有各的槽、本来就并存,一律不碰注册表。
             var targetLogin = _profiles.ReadLoginName(targetId);
-            if (targetLogin is null || fromId is not long from) return;
+            if (targetLogin is null || fromId is null) return;
             if (!string.Equals(targetLogin, _loginNameBeforeSwitch, StringComparison.OrdinalIgnoreCase)) return;
 
-            var saved = _profiles.ReadTokens(targetId);
-            var fromSaved = _profiles.ReadTokens(from);
-            if (saved.Count == 0 || fromSaved.Count == 0) return;   // 两边都存过才敢动,存不全就宁可不写
+            // 2) 只写【这个号自己的那一个槽】。槽名是登录后「哪个槽变了」学出来的,学不出来就不动。
+            //    早先用「两个号的快照互相 diff 取有争议的槽」——那是错的:第三个号中途登录过的话,
+            //    它的槽在两份快照里也不一样,会被一并写回旧值,把它的有效令牌覆盖成过期的。
+            var slot = _profiles.ReadOwnSlot(targetId);
+            if (slot is null) return;
 
-            // 2) 关键的收窄:只写【这两个号之间真正有争议的槽】——
-            //    也就是目标号那份快照和来源号那份快照【不一样】的槽,正好就是它俩共用的那个。
-            //    绝不能只按「和当前注册表不一样」来写:那样会把快照里【别的号的旧令牌】也一起写回去,
-            //    把那个号(比如中途登过的第三个号)的有效令牌覆盖成过期的,反而制造新故障。
-            var contested = TokenStore.SlotsToRestore(saved, fromSaved);
-            if (contested.Count == 0) return;
+            var saved = _profiles.ReadTokens(targetId);
+            if (!saved.TryGetValue(slot, out var want)) return;   // 没存到它的令牌(存快照时槽正好是空的)
 
             var current = _tokens.ReadAll();
-            foreach (var slot in contested)
-                if (!current.TryGetValue(slot, out var now) || !now.AsSpan().SequenceEqual(saved[slot]))
-                    _tokens.Write(slot, saved[slot]);
+            if (current.TryGetValue(slot, out var now) && now.AsSpan().SequenceEqual(want)) return;  // 已经是它
+
+            _tokens.Write(slot, want);
         }
         catch { /* 令牌写回是增强,失败不该让整个切换失败 */ }
     }
 
+    /// <summary>
+    /// 存快照时把令牌一起记下,并顺便学出「这个号自己的槽是哪个」:
+    /// 和全局上次见到的状态相比,刚好只变了一个槽时,那个槽就是刚登录的这个号的。
+    /// 变了多个(中间夹了别的登录)就不学 —— 宁可学不出来,也别记错把别人的槽认成自己的。
+    /// </summary>
+    private void CaptureTokens(long accountId)
+    {
+        try
+        {
+            var current = _tokens.ReadAll();
+            if (current.Count == 0) return;
+
+            var changed = TokenStore.ChangedSince(TokenStore.ReadLastSeen(), current);
+            if (changed.Count == 1)
+                _profiles.SaveOwnSlot(accountId, changed[0]);
+
+            _profiles.SaveTokens(accountId, current);
+            TokenStore.WriteLastSeen(current);
+        }
+        catch { }
+    }
+
     /// <summary>切换开始时(还没还原文件)记下的当前登录名,用来判断目标号是不是同邮箱。</summary>
     private string? _loginNameBeforeSwitch;
+
+    /// <summary>
+    /// 跨区服切号时,把守望先锋的游戏文件也换成目标区服那套,省掉每次一百多兆的重新下载。
+    ///
+    /// 国服用网易 NEAC 反作弊、国际服用暴雪原版,是两套不同的二进制;战网【不校验磁盘文件】,
+    /// 只认 Agent 数据库里记的构建,所以 <see cref="GameStateStore"/> 会把两边一起换(见其类注释)。
+    ///
+    /// 只在【已经存过目标区服快照】时才动手;没存过就什么都不做 —— 让战网照旧下载,不制造新问题。
+    /// 调用时机必须是优雅退出之后、启动客户端之前。
+    /// </summary>
+    private async Task<string?> RestoreGameStateIfCrossRegionAsync(AccountRow target)
+    {
+        try
+        {
+            if (_gameState.GameRoot is null) return null;
+
+            // 目标账号该用哪个区服的游戏:环境串第一段就是区服代码(cn/kr/us/eu)
+            var want = AccountRow.IsCn(target.Environment) ? "CN"
+                     : target.Environment.Split('.').FirstOrDefault()?.ToUpperInvariant();
+            if (string.IsNullOrEmpty(want)) return null;
+
+            var now = await Task.Run(() => _gameState.ReadCurrentRegion());
+            if (string.Equals(now, want, StringComparison.OrdinalIgnoreCase)) return null;  // 同区服,一个字节都不碰
+
+            // Agent 内存里存着 product.db,活着时读到的可能是半写状态、写进去又会被它覆盖回来。
+            // 所以【存和还原都放在它退干净之后】。只有跨区服才等,普通切号不受影响。
+            StatusText = "正在等待战网后台进程退出…";
+            // 先给它几秒自己退(最省事也最干净);超时了才看用户有没有允许强制结束。
+            var stopped = await Task.Run(() => BattleNetController.WaitUntilAgentStopped(attempts: 12));
+            if (!stopped && _settings.ForceKillAgentOnSwitch)
+            {
+                StatusText = "正在结束战网后台进程(Agent)…";
+                await Task.Run(() => BattleNetController.KillAgent());
+                stopped = await Task.Run(() => BattleNetController.WaitUntilAgentStopped(attempts: 12));
+            }
+            else if (!stopped)
+            {
+                stopped = await Task.Run(() => BattleNetController.WaitUntilAgentStopped(attempts: 68));
+            }
+            if (!stopped)
+                return "游戏文件未切换:战网后台进程未退出";   // 切号照常进行
+
+            // 先把【要切走的这个区服】自动存一份:此刻客户端刚优雅退出,用户上一秒还在正常用,
+            // 这是最可信的时机。状态不自洽(下了一半 / 正在修复)就跳过,宁可用旧快照。
+            if (await Task.Run(() => _gameState.IsConsistent(out _)))
+            {
+                StatusText = $"正在记录{RegionLabel(now ?? "")}的游戏状态…";
+                try { await Task.Run(() => _gameState.Capture()); }
+                catch { /* 存不上不影响切换,继续 */ }
+            }
+
+            if (!_gameState.Has(want))
+                // 目标区服还没存过 —— 这次只能让战网自己下载,下完再切回来时就有了
+                return $"还没记录过{RegionLabel(want)}的游戏文件,这次仍需战网下载(下次就不用了)";
+
+            StatusText = $"正在切换游戏文件到{RegionLabel(want)}(省去重新下载)…";
+            var (restored, _, _) = await Task.Run(() => _gameState.Restore(want));
+
+            // 结果要带回去让调用方拼进最终那句 —— 方法返回后 SwitchToAsync 会立刻把状态改成
+            // 「正在启动战网…」,在这里写 StatusText 只能存在几毫秒,用户根本看不见。
+            return $"游戏文件已切到{RegionLabel(want)}({restored} 个文件,省去重新下载)";
+        }
+        catch (Exception ex)
+        {
+            // 换游戏文件只是省下载的增强,失败了不该让切号本身失败 —— 大不了让战网自己更新一次。
+            return "游戏文件未切换(" + ex.Message + "),战网可能需要重新下载";
+        }
+    }
+
+    private static string RegionLabel(string region) => region.ToUpperInvariant() switch
+    {
+        "CN" => "国服",
+        "KR" => "亚服",
+        "US" => "美服",
+        "EU" => "欧服",
+        _ => region,
+    };
+
 
     /// <summary>切换到目标账号:关战网 → 更新当前号快照 → 还原目标 → 重启。点卡片直接切,不再二次确认。</summary>
     public async Task SwitchToAsync(AccountRow target)
@@ -1066,7 +1234,7 @@ public sealed class MainViewModel : ObservableObject
                     StatusText = $"正在更新当前号「{curRow.BattleTag}」的快照…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
                     _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
-                    _profiles.SaveTokens(cur, await Task.Run(() => _tokens.ReadAll()));
+                    await Task.Run(() => CaptureTokens(cur));
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;   // 它刚才还登着,令牌显然是好的
                 }
@@ -1085,6 +1253,9 @@ public sealed class MainViewModel : ObservableObject
             // 必须卡在【客户端已退出、还没启动】这个空档:让客户端拿着错令牌启动,它会自己把槽删掉。
             await Task.Run(() => RestoreTokenIfSameLogin(target.AccountId, saveInto));
 
+            // 跨区服切换时把游戏文件也换过去,省掉每次一百多兆的重新下载。
+            var gameNote = await RestoreGameStateIfCrossRegionAsync(target);
+
             StatusText = "正在启动战网…";
             await Task.Run(() => _controller.LaunchClient());
 
@@ -1097,7 +1268,8 @@ public sealed class MainViewModel : ObservableObject
             // 交给轮询去核对战网真正登上了谁 —— 令牌没了的话这里一切正常,人是在几十秒后才发现的。
             _pendingSwitchId = target.AccountId;
             _pendingSwitchUntil = DateTime.UtcNow.AddSeconds(SwitchVerifySeconds);
-            StatusText = $"已切换到「{target.BattleTag}」,战网正在启动,正在确认登录结果…";
+            StatusText = $"已切换到「{target.BattleTag}」,战网正在启动,正在确认登录结果…"
+                       + (gameNote is null ? "" : "  |  " + gameNote);
         }
         catch (Exception ex)
         {
@@ -1136,7 +1308,7 @@ public sealed class MainViewModel : ObservableObject
                     StatusText = $"正在保存当前号「{curRow.BattleTag}」…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
                     _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
-                    _profiles.SaveTokens(cur, await Task.Run(() => _tokens.ReadAll()));
+                    await Task.Run(() => CaptureTokens(cur));
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;
                 }

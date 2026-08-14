@@ -4,10 +4,35 @@ using BnetSwitch.Services.Overwatch;
 
 namespace BnetSwitch.Services;
 
-/// <summary>一个账号缓存下来的段位(只留「最高的那个定位」+ 一行全量文案)。</summary>
+/// <summary>一个定位的段位。卡片上每个定位单独一个 pill。</summary>
+public sealed class RankRole
+{
+    /// <summary>坦克 / 输出 / 治疗 / 开放。</summary>
+    public string RoleCn { get; set; } = "";
+
+    /// <summary>英文档位(Diamond),比高低用它。</summary>
+    public string TierEn { get; set; } = "";
+
+    /// <summary>1~5,1 最高;大师以上没小段是 0。</summary>
+    public int Division { get; set; }
+
+    /// <summary>直接显示的档位文案,如「钻石1」。</summary>
+    public string Text { get; set; } = "";
+
+    public string? BrushKey { get; set; }
+    public string? IconPath { get; set; }
+}
+
+/// <summary>
+/// 一个账号缓存下来的段位。
+/// 顶部字段是「最高的那个定位」(排序/单 pill 用),<see cref="Roles"/> 是全部定位(卡片上全展开)。
+/// </summary>
 public sealed class RankEntry
 {
     public long AccountId { get; set; }
+
+    /// <summary>全部定位,已按高低排好。老版本的 ranks.json 没有这个字段 —— 读出来是空表,由 VM 兜底成单条。</summary>
+    public List<RankRole> Roles { get; set; } = new();
 
     /// <summary>英文档位(Diamond)。比高低、换算图标都用它,别用中文。</summary>
     public string TierEn { get; set; } = "";

@@ -60,6 +60,17 @@ public sealed class AppSettings
     /// <summary>启动时直接最小化到托盘(配合开机自启用)。</summary>
     public bool StartMinimized { get; set; } = false;
 
+    /// <summary>
+    /// 跨区服切号时,等不及 Agent.exe 自己退出就直接结束它。
+    ///
+    /// 换游戏文件必须在 Agent 退干净之后做 —— 它内存里存着 product.db,活着时写进去会被它覆盖回来。
+    /// 而它比客户端慢一拍才退,实测平均要等 15 秒,这是跨区服切号唯一的耗时来源
+    /// (换文件本身是 0.0 秒)。结束它的风险很低:Agent 只管下载/安装,不持有任何登录状态
+    /// (令牌在注册表、登录态在 %APPDATA%),战网启动时会自己把它拉起来。
+    /// 默认关 —— 动别人的进程这件事,交给用户自己决定。
+    /// </summary>
+    public bool ForceKillAgentOnSwitch { get; set; } = false;
+
     /// <summary>深色模式。</summary>
     public bool DarkMode { get; set; } = false;
 

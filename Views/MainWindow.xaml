@@ -1,4 +1,4 @@
-<Window x:Class="BnetSwitch.MainWindow"
+﻿<Window x:Class="BnetSwitch.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctrl="clr-namespace:BnetSwitch.Controls"
@@ -298,16 +298,6 @@
                                                     </DockPanel>
                                                     <DockPanel Margin="0,2,0,0">
                                                         <Ellipse DockPanel.Dock="Left" Width="6" Height="6" Fill="{DynamicResource Fresh}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                                        <!-- 段位 pill:只显示最高的那个定位,Tooltip 里给全量 -->
-                                                        <Border DockPanel.Dock="Left" CornerRadius="4" Padding="4,1" Margin="0,0,6,0"
-                                                                VerticalAlignment="Center" Background="{DynamicResource TagBg}"
-                                                                Visibility="{Binding RankVisibility}" ToolTip="{Binding RankTip}">
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <Image Source="{Binding RankIcon}" Width="13" Height="13" Margin="0,0,3,0" VerticalAlignment="Center" />
-                                                                <TextBlock Text="{Binding RankText, Mode=OneWay}" FontSize="10.5"
-                                                                           Foreground="{Binding RankBrush}" VerticalAlignment="Center" />
-                                                            </StackPanel>
-                                                        </Border>
                                                         <Border x:Name="RegionPill" DockPanel.Dock="Left" CornerRadius="4" Padding="5,1" Margin="0,0,6,0"
                                                                 VerticalAlignment="Center" Background="{DynamicResource TagBg}"
                                                                 Visibility="{Binding RegionVisibility}">
@@ -324,9 +314,29 @@
                                                                 <TextBlock Text="登录已过期" FontSize="10.5" Foreground="{DynamicResource WarnTx}" />
                                                             </StackPanel>
                                                         </Border>
-                                                        <TextBlock FontSize="11.5" Foreground="{DynamicResource Tx3}" TextTrimming="CharacterEllipsis">
+                                                        <TextBlock DockPanel.Dock="Left" FontSize="11.5" Foreground="{DynamicResource Tx3}" TextTrimming="CharacterEllipsis">
                                                             <Run Text="{Binding SavedRelative, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding AccountIdText, Mode=OneWay}" />
                                                         </TextBlock>
+                                                        <!-- 段位:账号编号后面,一个定位一个 pill,全部展开 -->
+                                                        <ItemsControl ItemsSource="{Binding RankRoles}" VerticalAlignment="Center" Margin="8,0,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Border CornerRadius="4" Padding="4,1" Margin="0,0,5,0"
+                                                                            VerticalAlignment="Center" Background="{DynamicResource TagBg}">
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <Image Source="{Binding Icon}" Width="13" Height="13" Margin="0,0,3,0" VerticalAlignment="Center" />
+                                                                            <TextBlock Text="{Binding RoleCn, Mode=OneWay}" FontSize="10.5" Margin="0,0,3,0"
+                                                                                       Foreground="{DynamicResource Tx3}" VerticalAlignment="Center" />
+                                                                            <TextBlock Text="{Binding Text, Mode=OneWay}" FontSize="10.5"
+                                                                                       Foreground="{Binding Brush}" VerticalAlignment="Center" />
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
                                                     </DockPanel>
                                                 </StackPanel>
                                             </DockPanel>
@@ -406,25 +416,35 @@
                                                                    Margin="7,1,0,0" TextTrimming="CharacterEllipsis" />
                                                     </DockPanel>
                                                     <DockPanel Margin="0,2,0,0">
-                                                        <!-- 段位 pill:未保存的号一样有段位,搜索也搜得到 -->
-                                                        <Border DockPanel.Dock="Left" CornerRadius="4" Padding="4,1" Margin="0,0,6,0"
-                                                                VerticalAlignment="Center" Background="{DynamicResource TagBg}"
-                                                                Visibility="{Binding RankVisibility}" ToolTip="{Binding RankTip}">
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <Image Source="{Binding RankIcon}" Width="13" Height="13" Margin="0,0,3,0" VerticalAlignment="Center" />
-                                                                <TextBlock Text="{Binding RankText, Mode=OneWay}" FontSize="10.5"
-                                                                           Foreground="{Binding RankBrush}" VerticalAlignment="Center" />
-                                                            </StackPanel>
-                                                        </Border>
                                                         <Border x:Name="RegionPill2" DockPanel.Dock="Left" CornerRadius="4" Padding="5,1" Margin="0,0,6,0"
                                                                 VerticalAlignment="Center" Background="{DynamicResource TagBg}"
                                                                 Visibility="{Binding RegionVisibility}">
                                                             <TextBlock x:Name="RegionTx2" Text="{Binding RegionText, Mode=OneWay}" FontSize="10.5"
                                                                        Foreground="{DynamicResource Tx3}" />
                                                         </Border>
-                                                        <TextBlock FontSize="11.5" Foreground="{DynamicResource Tx3}" TextTrimming="CharacterEllipsis">
+                                                        <TextBlock DockPanel.Dock="Left" FontSize="11.5" Foreground="{DynamicResource Tx3}" TextTrimming="CharacterEllipsis">
                                                             <Run Text="未保存 · " /><Run Text="{Binding AccountIdText, Mode=OneWay}" />
                                                         </TextBlock>
+                                                        <!-- 段位:账号编号后面,一个定位一个 pill,全部展开 -->
+                                                        <ItemsControl ItemsSource="{Binding RankRoles}" VerticalAlignment="Center" Margin="8,0,0,0">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Border CornerRadius="4" Padding="4,1" Margin="0,0,5,0"
+                                                                            VerticalAlignment="Center" Background="{DynamicResource TagBg}">
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <Image Source="{Binding Icon}" Width="13" Height="13" Margin="0,0,3,0" VerticalAlignment="Center" />
+                                                                            <TextBlock Text="{Binding RoleCn, Mode=OneWay}" FontSize="10.5" Margin="0,0,3,0"
+                                                                                       Foreground="{DynamicResource Tx3}" VerticalAlignment="Center" />
+                                                                            <TextBlock Text="{Binding Text, Mode=OneWay}" FontSize="10.5"
+                                                                                       Foreground="{Binding Brush}" VerticalAlignment="Center" />
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
                                                     </DockPanel>
                                                 </StackPanel>
                                             </DockPanel>

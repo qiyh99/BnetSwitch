@@ -20,6 +20,7 @@ public partial class SettingsWindow : Window
         _loading = true;
         SwAutoStart.IsChecked = StartupService.IsEnabled();
         SwCloseToTray.IsChecked = vm.Settings.CloseToTray;
+        SwKillAgent.IsChecked = vm.Settings.ForceKillAgentOnSwitch;
         SwDark.IsChecked = vm.Settings.DarkMode;
         PathBox.Text = string.IsNullOrWhiteSpace(vm.Settings.ClientExe) ? "(自动探测)" : vm.Settings.ClientExe;
         VerText.Text = $"当前版本 {vm.AppVersion}";
@@ -70,6 +71,13 @@ public partial class SettingsWindow : Window
         if (_loading) return;
         _vm.Settings.CloseToTray = SwCloseToTray.IsChecked == true;
         _vm.Settings.CloseChoiceMade = true;   // 手动设过就不再弹首次二选一
+        _vm.Settings.Save();
+    }
+
+    private void OnKillAgent(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _vm.Settings.ForceKillAgentOnSwitch = SwKillAgent.IsChecked == true;
         _vm.Settings.Save();
     }
 

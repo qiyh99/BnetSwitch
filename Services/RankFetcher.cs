@@ -160,7 +160,8 @@ public sealed class RankFetcher
         int ScoreOf((string RoleCn, string TierEn, int Div, string Cn, string? Brush, string? Icon) x)
             => OwMappings.TierOrder(x.TierEn) * 10 + (x.Div > 0 ? 6 - x.Div : 6);
 
-        var top = picks.OrderByDescending(ScoreOf).First();
+        var sorted = picks.OrderByDescending(ScoreOf).ToList();
+        var top = sorted[0];
 
         return new RankEntry
         {
@@ -171,8 +172,18 @@ public sealed class RankFetcher
             Text = top.Div > 0 ? $"{top.Cn}{top.Div}" : top.Cn,
             BrushKey = top.Brush,
             IconPath = top.Icon,
-            AllText = string.Join(" · ", picks.OrderByDescending(ScoreOf)
+            AllText = string.Join(" · ", sorted
                 .Select(x => x.Div > 0 ? $"{x.RoleCn} {x.Cn}{x.Div}" : $"{x.RoleCn} {x.Cn}")),
+            // 全部定位:卡片上一个定位一个 pill,不再只显示最高的那个
+            Roles = sorted.Select(x => new RankRole
+            {
+                RoleCn = x.RoleCn,
+                TierEn = x.TierEn,
+                Division = x.Div,
+                Text = x.Div > 0 ? $"{x.Cn}{x.Div}" : x.Cn,
+                BrushKey = x.Brush,
+                IconPath = x.Icon,
+            }).ToList(),
         };
     }
 }

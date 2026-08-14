@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -12,7 +12,7 @@
     <RootNamespace>BnetSwitch</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>2.0.5</Version>
+    <Version>2.1.0</Version>
     <Authors>BnetSwitch</Authors>
     <Product>战网账号切换管理器</Product>
   </PropertyGroup>

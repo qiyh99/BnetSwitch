@@ -109,6 +109,55 @@ public sealed class BattleNetController
         return !IsClientRunning();
     }
 
+    /// <summary>Agent.exe 是否在运行。</summary>
+    public static bool IsAgentRunning() => Process.GetProcessesByName("Agent").Any();
+
+    /// <summary>
+    /// 等 Agent.exe 也退出(它比客户端慢一拍,自己会退)。
+    ///
+    /// 只有【换区服游戏状态】才需要等它:Agent 内存里存着
+    /// <c>C:\ProgramData\Battle.net\Agent\product.db</c>,它活着的时候写进去会被它覆盖回来
+    /// (实测:写入 CN 一分半后被改回 KR)。切账号本身不需要等 —— 别拿这个拖慢普通切换。
+    /// 绝不强杀,等不到就让调用方放弃换游戏状态。
+    /// </summary>
+    public static bool WaitUntilAgentStopped(int attempts = 80, int intervalMs = 250)
+    {
+        for (var i = 0; i < attempts; i++)
+        {
+            if (!IsAgentRunning()) return true;
+            Thread.Sleep(intervalMs);
+        }
+        return !IsAgentRunning();
+    }
+
+    /// <summary>
+    /// 结束战网的 Agent.exe。只在用户显式打开「强制关闭 Agent」时调用。
+    ///
+    /// 这里【严格按可执行文件路径认人】—— "Agent.exe" 是个烂大街的进程名,
+    /// 别的软件也叫这个,认错了就是杀别人的进程。只认路径里带 Battle.net 的那个。
+    /// Agent 不持有登录状态,战网启动时会自己重新拉起它。
+    /// </summary>
+    public static int KillAgent()
+    {
+        var killed = 0;
+        foreach (var p in Process.GetProcessesByName("Agent"))
+        {
+            try
+            {
+                var path = p.MainModule?.FileName ?? "";
+                if (path.Contains("Battle.net", StringComparison.OrdinalIgnoreCase))
+                {
+                    p.Kill();
+                    p.WaitForExit(5000);
+                    killed++;
+                }
+            }
+            catch { }
+            finally { p.Dispose(); }
+        }
+        return killed;
+    }
+
     /// <summary>
     /// 战网已经在跑就把它的窗口唤到前台,返回是否唤到了。
     /// 缩在托盘里的时候顶层窗是隐藏的,这里拿不到可见窗 → 返回 false,交给调用方再跑一次 exe

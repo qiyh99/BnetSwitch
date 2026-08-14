@@ -89,6 +89,32 @@ public sealed class AppDataStore
         return map;
     }
 
+    /// <summary>
+    /// 该账号自己的令牌槽名(UnifiedAuth 下那个 8 位十六进制的值名)。
+    /// 由「登录后哪个槽变了」学出来,见 <see cref="TokenStore.ChangedSince"/>。
+    /// 还原令牌时只写这一个槽 —— 写多了会把别的号的有效令牌覆盖成过期的。
+    /// </summary>
+    private string OwnSlotFile(long id) => Path.Combine(Dir(id), "uauth_slot.txt");
+
+    public void SaveOwnSlot(long id, string slot)
+    {
+        if (string.IsNullOrWhiteSpace(slot)) return;
+        Directory.CreateDirectory(Dir(id));
+        File.WriteAllText(OwnSlotFile(id), slot.Trim());
+    }
+
+    public string? ReadOwnSlot(long id)
+    {
+        try
+        {
+            var f = OwnSlotFile(id);
+            if (!File.Exists(f)) return null;
+            var s = File.ReadAllText(f).Trim();
+            return s.Length == 0 ? null : s;
+        }
+        catch { return null; }
+    }
+
     /// <summary>该账号快照里的登录名(SavedAccountNames 第一项)。</summary>
     public string? ReadLoginName(long id) => ExtractLoginName(Path.Combine(DataDir(id), "Battle.net.config"));
 

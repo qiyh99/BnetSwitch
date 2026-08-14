@@ -53,6 +53,17 @@
                                   Checked="OnDark" Unchecked="OnDark" />
                     <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
                 </Grid>
+                <!-- 跨区服切号时强制结束 Agent -->
+                <Grid MinHeight="50">
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,60,0">
+                        <TextBlock Text="跨区服切号时强制关闭后台进程" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                        <TextBlock Text="国服↔亚服切号要等战网 Agent 退出(约 15 秒)。开启后等 3 秒就直接结束它,几乎瞬间完成。Agent 只管下载安装、不管登录,战网会自动重启它。"
+                                   Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleButton x:Name="SwKillAgent" Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  Checked="OnKillAgent" Unchecked="OnKillAgent" />
+                    <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
+                </Grid>
                 <!-- 版本更新 -->
                 <Grid MinHeight="50">
                     <StackPanel VerticalAlignment="Center">

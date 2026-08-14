@@ -1,3 +1,6 @@
+using System.IO;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Win32;
 
 namespace BnetSwitch.Services;
@@ -54,17 +57,53 @@ public sealed class TokenStore
     }
 
     /// <summary>
-    /// 找出「该写回哪些槽」:目标号存快照那一刻的令牌 <paramref name="saved"/> 里,
-    /// 与当前注册表 <paramref name="current"/> 不一样的槽。
-    /// 同邮箱那一对,这里正好只会命中那个共用槽。
+    /// 全局「上次见到的槽状态」(槽名 → sha256),用来学出【哪个槽属于哪个号】:
+    /// 某个号登录之后,和上次相比变化的那个槽,就是它的。
+    ///
+    /// 【为什么必须学出来】早先的做法是拿两个号的快照互相 diff 取「有争议的槽」,
+    /// 结果第三个号中途登录过、它的槽在两份快照里也不一样,于是会被一起写回旧值 ——
+    /// 修一个号的同时把另一个号的有效令牌覆盖成过期的。精确到「这个号自己的槽」才安全。
     /// </summary>
-    public static List<string> SlotsToRestore(
-        IReadOnlyDictionary<string, byte[]> saved,
+    private static string LastSeenFile => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "BnetSwitch", "uauth_lastseen.json");
+
+    public static Dictionary<string, string> ReadLastSeen()
+    {
+        try
+        {
+            if (File.Exists(LastSeenFile))
+                return JsonSerializer.Deserialize<Dictionary<string, string>>(
+                    File.ReadAllText(LastSeenFile)) ?? new();
+        }
+        catch { }
+        return new();
+    }
+
+    public static void WriteLastSeen(IReadOnlyDictionary<string, byte[]> slots)
+    {
+        try
+        {
+            var dto = slots.ToDictionary(kv => kv.Key, kv => Hash(kv.Value));
+            Directory.CreateDirectory(Path.GetDirectoryName(LastSeenFile)!);
+            File.WriteAllText(LastSeenFile, JsonSerializer.Serialize(dto));
+        }
+        catch { }
+    }
+
+    public static string Hash(byte[] v) => Convert.ToHexString(SHA256.HashData(v));
+
+    /// <summary>
+    /// 和上次相比变化(或新增)的槽。刚好只变一个时,那就是刚登录的这个号自己的槽。
+    /// 变了多个说明中间夹了别的登录,学不出来 —— 宁可不学,也别记错。
+    /// </summary>
+    public static List<string> ChangedSince(
+        IReadOnlyDictionary<string, string> lastSeen,
         IReadOnlyDictionary<string, byte[]> current)
     {
         var list = new List<string>();
-        foreach (var kv in saved)
-            if (!current.TryGetValue(kv.Key, out var now) || !now.AsSpan().SequenceEqual(kv.Value))
+        foreach (var kv in current)
+            if (!lastSeen.TryGetValue(kv.Key, out var old) || old != Hash(kv.Value))
                 list.Add(kv.Key);
         return list;
     }
