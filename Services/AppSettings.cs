@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace BnetSwitch.Services;
@@ -67,10 +67,11 @@ public sealed class AppSettings
     /// 而它比客户端慢一拍才退,实测平均要等 15 秒,这是跨区服切号唯一的耗时来源
     /// (换文件本身是 0.0 秒)。结束它的风险很低:Agent 只管下载/安装,不持有任何登录状态
     /// (令牌在注册表、登录态在 %APPDATA%),战网启动时会自己把它拉起来。
-    /// 默认开:等十几秒的体验太差,而代价只是结束一个会自动重启的下载代理进程。
-    /// 关掉就退回「老老实实等它自己退」。
+    /// 【默认关】2026-08-14:开启它之后,跨区服切号开始出现「服务端拒绝令牌 → 客户端删掉免密」,
+    /// 而在此之前用等待版切了很多次都没事。强杀这个常驻服务进程很可能破坏了客户端的会话状态。
+    /// 在查清楚之前不要默认开 —— 省十几秒不值得拿账号的免密去换。
     /// </summary>
-    public bool ForceKillAgentOnSwitch { get; set; } = true;
+    public bool ForceKillAgentOnSwitch { get; set; } = false;
 
     /// <summary>深色模式。</summary>
     public bool DarkMode { get; set; } = false;

@@ -10,18 +10,16 @@ namespace BnetSwitch.Services;
 /// 每个账号占一个「槽」(值名是 8 位十六进制,如 4EB0C645),值是 DPAPI 封装的二进制(绑当前 Windows 用户)。
 ///
 /// 同一个邮箱在两个区服注册的两个账号(一个 CN、一个 KR)【共用同一个槽】,谁后登录槽里就是谁的令牌。
+/// 另一个号切过去时,把它自己那份令牌写回槽,即可免密登入(见 <see cref="Write"/> 的调用方)。
 ///
-/// 【本类只读,绝不写回 —— 这是 2026-08-14 用一串坏掉的账号换来的结论】
-/// 曾经尝试过「把快照里存的令牌写回槽」来解决同邮箱那一对,当场看着是成功的,实际是灾难:
-/// 暴雪的免密令牌【一次性轮换】,每次成功登录都会发新的、作废旧的。快照里那份只要该号之后
-/// 又登录过就已经作废,写回去必然被服务端拒绝:
-///     W [LoginController] Tassadar token rejected by BGS: web_auth_url
-///     I [BNLogin] DeleteToken(): Deleting registry token because !m_lastEmailUsed.empty()
-/// 客户端一被拒就【把整个槽删掉】—— 死令牌没用上,槽里原本那个【活的】也一起赔进去。
-/// 实测:开启写回后每次启动删 4 个令牌,半小时报废了三个账号的免密。
+/// 【2026-08-14 的事故与真相,别再误删这块】
+/// 当天一度出现「切号后账号丢失免密」,我误以为是「写回旧令牌被服务端拒→客户端删槽」,
+/// 把写回整个删掉了。实际根因是那一版新加的【切号时强杀 Agent.exe】破坏了客户端会话,
+/// 导致服务端拒绝令牌(日志 Tassadar token rejected by BGS)、客户端随即删槽 ——
+/// 用「等 Agent 自己退出」的版本切很多次都没事。强杀 Agent 已改回默认关。
+/// 写回本身是对的:只写「这个号自己的槽」的「当前最新令牌」、且在客户端退出时写。
 ///
-/// 所以:令牌可以【读】(存进快照供排障、判断某个号是否还有免密),但【任何情况下都不写】。
-/// 同邮箱那一对目前无解 —— 只能接受「在这两个号之间来回切,要手动登一次密码」。
+/// 【铁律】只写自己存过的值,绝不 delete / 绝不清空 —— 删槽会把并存的其他账号令牌一起毁掉。
 /// </summary>
 public sealed class TokenStore
 {
@@ -43,9 +41,26 @@ public sealed class TokenStore
         return map;
     }
 
-    // 【故意不提供写入方法】2026-08-14 实测:暴雪令牌一次性轮换,把快照里的旧令牌写回注册表
-    // 会被服务器拒绝(Tassadar token rejected by BGS),客户端随即把整个槽删掉 ——
-    // 旧令牌没用上,槽里原本的活令牌也一起没了。所以本类【只读】。
+    /// <summary>
+    /// 把一个槽的值写回注册表(只写,不删)。成功返回 true。
+    ///
+    /// 【用途】同邮箱两个区服共用一个槽,切过去时把这个号自己那份令牌写回去,免密登入。
+    /// 【前提】必须由调用方保证:只写「这个号自己的槽」的「最新令牌」,且在客户端已退出时写。
+    /// 2026-08-14 曾出事,但根因查明是【切号时强杀 Agent】破坏了会话导致服务端拒绝令牌,
+    /// 不是写回本身的错;强杀 Agent 已改回默认关。
+    /// </summary>
+    public bool Write(string slot, byte[] value)
+    {
+        if (string.IsNullOrWhiteSpace(slot) || value.Length == 0) return false;
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(KeyPath, writable: true);
+            if (key is null) return false;
+            key.SetValue(slot, value, RegistryValueKind.Binary);
+            return true;
+        }
+        catch { return false; }
+    }
 
     /// <summary>
     /// 全局「上次见到的槽状态」(槽名 → sha256),用来学出【哪个槽属于哪个号】:

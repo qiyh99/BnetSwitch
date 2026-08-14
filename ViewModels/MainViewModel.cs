@@ -274,6 +274,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly RankStore _ranks;
     private readonly TokenStore _tokens = new();
     private readonly GameStateStore _gameState = new();
+    private readonly SwitchJournal _journal = new();
 
     /// <summary>全部账号(主表)。</summary>
     public ObservableCollection<AccountRow> Accounts { get; } = new();
@@ -835,9 +836,20 @@ public sealed class MainViewModel : ObservableObject
     {
         var active = await Task.Run(() => _reader.ReadActiveAccountId());
 
-        if (active == targetId)
+        // 【不能只看 active == targetId】那个活跃指针是切换时我们自己写进去的,读回来必然相等,
+        // 拿它当"登录成功"等于自证。必须再要客户端自己产生的证据:日志里没有令牌被拒/删令牌,
+        // 且这个号的 account.db 被刷新过。
+        var confirmed = active == targetId
+                        && await Task.Run(() => LoginProbe.LoginConfirmed(targetId, _pendingSwitchSince));
+
+        if (confirmed)
         {
             _pendingSwitchId = null;
+
+            // 只有【真的登进去了】才存令牌 —— 此刻注册表里那份必定是这个号刚用过的、活的。
+            // 存错一次就会雪崩:坏值进快照 → 下次写回被拒 → 客户端又删一个槽,再也回不来。
+            await Task.Run(() => CaptureTokens(targetId));
+
             var row = Accounts.FirstOrDefault(a => a.AccountId == targetId);
             if (row is { IsExpired: true })
             {
@@ -848,7 +860,9 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        if (DateTime.UtcNow < _pendingSwitchUntil) return;   // 还在等,战网可能只是起得慢
+        // 已经明确被拒(日志里有 rejected/DeleteToken)就不用再等了,直接判失败
+        var rejected = await Task.Run(() => LoginProbe.SawTokenRejected(_pendingSwitchSince));
+        if (!rejected && DateTime.UtcNow < _pendingSwitchUntil) return;   // 还在等,战网可能只是起得慢
         _pendingSwitchId = null;
 
         // 战网压根没起来就别下结论(用户可能自己把它关了),下次再说
@@ -1062,8 +1076,36 @@ public sealed class MainViewModel : ObservableObject
             Busy = false;
         }
     }
+    /// <summary>
+    /// 把目标号自己那份令牌写回它自己的槽。
+    ///
+    /// 国服(网易)和亚服(暴雪)是两家的服务器,同邮箱的两个号却共用一个本地令牌槽 ——
+    /// 不写回就等于拿着国服令牌去敲暴雪,必然被拒,客户端随即把槽删掉,两个号一起没免密。
+    ///
+    /// 收得很紧:只在登录名相同时动注册表;只写这个号自己的那一个槽(登录后哪个槽变了学出来的);
+    /// 学不出来、或没存到它的令牌就不动。必须在优雅退出之后、启动客户端之前调用。
+    /// </summary>
+    private void RestoreOwnToken(long targetId)
+    {
+        try
+        {
+            // 【不要按「来源号是不是同邮箱」来判断】写回的是目标号【自己的槽】+【自己的令牌】,
+            // 这跟从哪个号切过来毫无关系。曾经加过 targetLogin == 切换前登录名 的守卫,
+            // 结果「从别的国服号切到亚服」时把写回整个挡掉了 —— 槽里还是别人的令牌,
+            // 拿去敲暴雪必然被拒、客户端随即删槽。这正是「国服之间切都正常,一切到亚服就崩」的原因。
+            var slot = _profiles.ReadOwnSlot(targetId);
+            if (slot is null) return;
 
+            var saved = _profiles.ReadTokens(targetId);
+            if (!saved.TryGetValue(slot, out var want)) return;
 
+            var current = _tokens.ReadAll();
+            if (current.TryGetValue(slot, out var now) && now.AsSpan().SequenceEqual(want)) return;
+
+            _tokens.Write(slot, want);
+        }
+        catch { /* 写回是增强,失败不该让整个切换失败 */ }
+    }
 
     /// <summary>
     /// 存快照时把令牌一起记下,并顺便学出「这个号自己的槽是哪个」:
@@ -1089,6 +1131,13 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>切换开始时(还没还原文件)记下的当前登录名,用来判断目标号是不是同邮箱。</summary>
     private string? _loginNameBeforeSwitch;
+
+    /// <summary>
+    /// 上一次「我们启动客户端」的时刻。判定登录成功/失败只看这之后客户端自己写下的证据。
+    /// 【必须初始化成工具启动时刻】默认 DateTime.MinValue 会让日志扫描把【历史上所有旧失败】
+    /// 都算进来,于是永远判定"这个会话失败过"→ 永远跳过存令牌 → 一直拿旧令牌写回 → 必被拒。
+    /// </summary>
+    private DateTime _pendingSwitchSince = DateTime.UtcNow;
 
     /// <summary>
     /// 跨区服切号时,把守望先锋的游戏文件也换成目标区服那套,省掉每次一百多兆的重新下载。
@@ -1194,10 +1243,30 @@ public sealed class MainViewModel : ObservableObject
             if (!stopped)
                 throw new InvalidOperationException("战网未能完全退出,已中止切换。请从托盘右键『退出』战网后重试。");
 
+            // 动任何文件之前先把现场拍下来:中途出错能原样放回去,程序被杀了下次启动也能收拾。
+            // 必须在优雅退出【之后】拍 —— 客户端退出时还会再写一遍配置,提前拍的是旧的。
+            await Task.Run(() => _journal.Begin("switch", target.AccountId, target.BattleTag,
+                _paths.RoamingDir, _reader.ReadActivePointerJson()));
+
             // 存进哪个号的快照,以 live config(FNV+区服)为准,不再信 CachedData 指针 ——
             // 指针在 %LOCALAPPDATA%、还原换不到,脱钩时会把当前状态灌进错误号的快照(切换后掉登录页)。
             // 判定不出唯一账号(null)就跳过这次保存:宁可不更新,也不污染。
             var saveInto = await Task.Run(() => _reader.ResolveCurrentAccountFromConfig());
+
+            // 【在切走的这一刻再存一次令牌】客户端在整个会话期间可能多次刷新令牌
+            // (实测:登录后第 8 秒存下的那份,一分钟后再用就被服务端拒了)。
+            // 优雅退出之后槽里是这个会话【最终】的那份,不管中途换过几次,存它最稳。
+            //
+            // 前提:这个会话【登录成功过】。失败的会话里槽已经被客户端删/改坏,
+            // 照存不误就会把坏值传下去,下次写回又被拒又删 —— 那正是之前雪崩的原因。
+            // 只看【上一次我们启动客户端之后】的日志:再往前翻会把旧失败算进来,导致永远不敢存。
+            var sessionStart = _pendingSwitchSince;
+            if (saveInto is long outgoing
+                && !await Task.Run(() => LoginProbe.SawTokenRejected(sessionStart)))
+            {
+                await Task.Run(() => CaptureTokens(outgoing));
+            }
+
             if (saveInto is long cur && cur != target.AccountId)
             {
                 var curRow = Accounts.FirstOrDefault(a => a.AccountId == cur);
@@ -1206,7 +1275,6 @@ public sealed class MainViewModel : ObservableObject
                     StatusText = $"正在更新当前号「{curRow.BattleTag}」的快照…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
                     _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
-                    await Task.Run(() => CaptureTokens(cur));
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;   // 它刚才还登着,令牌显然是好的
                 }
@@ -1220,14 +1288,11 @@ public sealed class MainViewModel : ObservableObject
             if (targetPtr is not null)
                 await Task.Run(() => _reader.WriteActivePointer(targetPtr));
 
-            // 同邮箱的两个区服账号(一个 CN、一个 KR)【共用一个 UnifiedAuth 令牌槽】,后登的会把先登的覆盖掉。
-            // 只有这种情况才需要把令牌写回 —— 不同邮箱各有各的槽,本来就并存,一个字节都不动。
-            // 必须卡在【客户端已退出、还没启动】这个空档:让客户端拿着错令牌启动,它会自己把槽删掉。
-            // 【不要往注册表写令牌】2026-08-14 实测教训:暴雪的免密令牌是【一次性轮换】的,
-            // 每次成功登录都会发新的、作废旧的。快照里存的那份只要该号之后又登录过就已经是死令牌,
-            // 写回去 → 服务器拒绝(日志 Tassadar token rejected by BGS)→ 客户端把整个槽删掉,
-            // 于是【死令牌没用上,原本槽里的活令牌也一起赔进去】。
-            // 令牌仍然会随快照存下来(排障有用),但绝不写回。
+            // 同邮箱的两个区服账号共用一个 UnifiedAuth 令牌槽(国服连网易、亚服连暴雪,是两家的服务器,
+            // 拿错区服的令牌去敲对方必被拒:Tassadar token rejected by BGS → 客户端把槽删掉)。
+            // 所以切过去之前,必须把【目标号自己那份】令牌写回槽。
+            // 存令牌的时机已经改成「确认登录成功之后」,这里读到的必定是它真正用过的那份。
+            await Task.Run(() => RestoreOwnToken(target.AccountId));
 
             // 跨区服切换时把游戏文件也换过去,省掉每次一百多兆的重新下载。
             var gameNote = await RestoreGameStateIfCrossRegionAsync(target);
@@ -1243,14 +1308,21 @@ public sealed class MainViewModel : ObservableObject
             // 还原的只是「当前是哪个号」的指针,能不能免密登进去取决于注册表里的令牌还在不在。
             // 交给轮询去核对战网真正登上了谁 —— 令牌没了的话这里一切正常,人是在几十秒后才发现的。
             _pendingSwitchId = target.AccountId;
+            _pendingSwitchSince = DateTime.UtcNow;   // 判定「登录成功」时只看这一刻之后客户端产生的证据
             _pendingSwitchUntil = DateTime.UtcNow.AddSeconds(SwitchVerifySeconds);
+            _journal.Commit();   // 走到这里文件都换好了,现场可以丢
             StatusText = $"已切换到「{target.BattleTag}」,战网正在启动,正在确认登录结果…"
                        + (gameNote is null ? "" : "  |  " + gameNote);
         }
         catch (Exception ex)
         {
-            StatusText = "切换失败:" + ex.Message;
-            MessageBox.Show(ex.Message, "切换失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            // 出错就把切换前的现场原样放回去 —— 宁可这次没切成,也不能让人停在半新半旧的状态里
+            var rolled = await Task.Run(() => _journal.Rollback(
+                _paths.RoamingDir, json => _reader.WriteActivePointer(json)));
+            StatusText = "切换失败:" + ex.Message + (rolled ? "(已恢复到切换前的状态)" : "");
+            MessageBox.Show(
+                ex.Message + (rolled ? "\n\n已自动恢复到切换前的状态,当前账号不受影响。" : ""),
+                "切换失败", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -1284,7 +1356,6 @@ public sealed class MainViewModel : ObservableObject
                     StatusText = $"正在保存当前号「{curRow.BattleTag}」…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
                     _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
-                    await Task.Run(() => CaptureTokens(cur));
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;
                 }
